@@ -5,9 +5,9 @@ API_KEY = "sk-fad59201f05146a5988bd4d78a04f3fa"
 
 
 def call_llm(prompt: str) -> str:
-    """调用 qwen-max，返回文本响应"""
+    """调用 glm-5.1，返回文本响应"""
     resp = dashscope.Generation.call(
-        model="qwen-max",
+        model="glm-5.1",
         messages=[{'role': 'user', 'content': prompt}],
         api_key=API_KEY
     )

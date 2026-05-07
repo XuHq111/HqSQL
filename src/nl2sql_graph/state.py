@@ -31,3 +31,8 @@ class OverallState(TypedDict):
     # === 异常 / 日志 ===
     error: Optional[str]                    # 异常信息
     warnings: List[str]                     # 非致命告警
+
+    sql_result: Optional[str]
+    sql_error: Optional[str]
+    retry_count: int
+    route: str
