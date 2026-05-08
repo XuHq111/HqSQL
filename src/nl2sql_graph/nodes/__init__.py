@@ -6,4 +6,5 @@ from . import generate
 from . import execute_sql
 from . import validate_result
 from . import fix_sql
+from . import clarify
 from . import lookup_values

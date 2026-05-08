@@ -1,5 +1,5 @@
 """Stage 1: LLM 重排序筛选节点"""
-from ..services.llm import call_llm, get_short_description
+from ..services.llm import call_llm_fast as call_llm, get_short_description
 from ..rules.dependencies import DEPENDENCY_RULES
 
 

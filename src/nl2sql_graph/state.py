@@ -1,5 +1,5 @@
 """NL2SQL LangGraph 共享状态定义"""
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Dict
 
 
 class RecallItem(TypedDict, total=False):
@@ -14,6 +14,14 @@ class OverallState(TypedDict):
 
     # === 输入 ===
     query: str                              # 用户自然语言查询
+
+    # Stage 0: 查询澄清
+    raw_query: str                          # 用户原始 NL，澄清过程中始终保留
+    skip_clarify: bool                      # 批量模式：跳过澄清全流程
+    clarify_phase: str                      # 状态机阶段："init" | "ask_user" | "process_response" | "confirmed" | "skipped"
+    clarify_round: int                      # 当前澄清轮数（1-based）
+    clarify_analysis: Optional[Dict]        # LLM 结构化输出 {enhanced_query, questions[], domain_notes, confidence}
+    clarify_user_response: str              # 用户的文本反馈
 
     # === Milvus 召回结果 ===
     all_tables: List[RecallItem]            # 召回的全部表（带分数+schema）

@@ -30,6 +30,12 @@ for item in test_queries:
 
     state: OverallState = {
         "query": query,
+        "raw_query": "",
+        "skip_clarify": True,
+        "clarify_phase": "init",
+        "clarify_round": 0,
+        "clarify_analysis": None,
+        "clarify_user_response": "",
         "all_tables": [],
         "selected_names": [],
         "rerank_raw": "",
@@ -45,7 +51,8 @@ for item in test_queries:
         "lookup_context": "",
         "node_timings": {},
     }
-    result = graph.invoke(state)
+    config = {"configurable": {"thread_id": f"batch_{qid}"}}
+    result = graph.invoke(state, config)
 
     for t in result["all_tables"]:
         print(f"  {t['table_name']:30s} score={t['score']:.4f}")

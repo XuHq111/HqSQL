@@ -2,14 +2,21 @@
 
 对比基线: nl2sql.py（原纯函数实现）
 """
+import uuid
 from pymilvus import Collection, connections
 from src.nl2sql_graph.graph_builder import build_graph
 from src.nl2sql_graph.state import OverallState
 
 
-def run_query(graph, collection, query: str) -> dict:
+def run_query(graph, query: str, skip_clarify: bool = True) -> dict:
     state: OverallState = {
         "query": query,
+        "raw_query": "",
+        "skip_clarify": skip_clarify,
+        "clarify_phase": "init",
+        "clarify_round": 0,
+        "clarify_analysis": None,
+        "clarify_user_response": "",
         "all_tables": [],
         "selected_names": [],
         "rerank_raw": "",
@@ -25,7 +32,8 @@ def run_query(graph, collection, query: str) -> dict:
         "lookup_context": "",
         "node_timings": {},
     }
-    return graph.invoke(state)
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+    return graph.invoke(state, config)
 
 
 def main():
@@ -47,7 +55,7 @@ def main():
         print(f"Query: {query}")
         print("-" * 70)
 
-        result = run_query(graph, collection, query)
+        result = run_query(graph, query)
 
         for t in result["all_tables"]:
             print(f"  {t['table_name']:30s} score={t['score']:.4f}")
