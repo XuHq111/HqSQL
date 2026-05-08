@@ -42,6 +42,7 @@ for item in test_queries:
         "sql_error": None,
         "retry_count": 0,
         "route": "",
+        "node_timings": {},
     }
     result = graph.invoke(state)
 
@@ -74,5 +75,15 @@ for item in test_queries:
     retries = result.get("retry_count", 0)
     if retries > 0:
         print(f"  [RETRY] 共重试 {retries} 次")
+
+    # 节点耗时汇总
+    timings = result.get("node_timings", {})
+    if timings:
+        total = sum(timings.values())
+        print(f"\n  --- 节点耗时 ---")
+        for name, sec in timings.items():
+            pct = sec / total * 100 if total > 0 else 0
+            print(f"  {name:25s} {sec:7.2f}s  ({pct:4.0f}%)")
+        print(f"  {'总计':25s} {total:7.2f}s")
 
 connections.disconnect("default")

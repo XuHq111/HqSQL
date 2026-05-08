@@ -36,3 +36,6 @@ class OverallState(TypedDict):
     sql_error: Optional[str]
     retry_count: int
     route: str
+
+    # === 性能追踪 ===
+    node_timings: dict                       # 各节点耗时 {node_name: elapsed_seconds}

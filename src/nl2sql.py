@@ -18,6 +18,11 @@ def run_query(graph, collection, query: str) -> dict:
         "prompt": "",
         "sql": "",
         "error": None,
+        "sql_result": None,
+        "sql_error": None,
+        "retry_count": 0,
+        "route": "",
+        "node_timings": {},
     }
     return graph.invoke(state)
 
@@ -53,6 +58,23 @@ def main():
             print(f"  [WARN] {result['warnings']}")
 
         print(f"\nGenerated SQL:\n{result['sql']}\n")
+
+        if result.get("sql_error"):
+            print(f"  [SQL ERROR] {result['sql_error']}")
+        if result.get("sql_result"):
+            lines = result["sql_result"].split("\n")
+            print(f"  结果（{len(lines)-1} 行）:")
+            for line in lines[:6]:
+                print(f"    {line}")
+
+        timings = result.get("node_timings", {})
+        if timings:
+            total = sum(timings.values())
+            print(f"\n  --- 节点耗时 ---")
+            for name, sec in timings.items():
+                pct = sec / total * 100 if total > 0 else 0
+                print(f"  {name:25s} {sec:7.2f}s  ({pct:4.0f}%)")
+            print(f"  {'总计':25s} {total:7.2f}s")
 
     connections.disconnect("default")
 

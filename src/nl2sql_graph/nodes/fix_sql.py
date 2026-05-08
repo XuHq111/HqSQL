@@ -1,5 +1,6 @@
 """SQL 修正节点 — LLM 根据错误信息修正 SQL"""
 from ..services.llm import call_llm
+from ..rules.sql_rules import SQL_RULES
 
 
 _FIX_TEMPLATE = """## 用户原始查询
@@ -13,6 +14,9 @@ _FIX_TEMPLATE = """## 用户原始查询
 
 ## 相关表结构
 {schema_context}
+
+## SQL 生成规则
+{sql_rules}
 
 ## 修复任务
 以上 SQL 执行时 {error_desc}，请修正。只输出修正后的 SQLite SQL，不要解释。"""
@@ -48,6 +52,7 @@ def fix_sql(state: dict) -> dict:
         error=error or "空结果",
         error_desc=error_desc,
         schema_context=schema_context,
+        sql_rules=SQL_RULES,
     )
 
     try:
