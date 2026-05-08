@@ -37,5 +37,8 @@ class OverallState(TypedDict):
     retry_count: int
     route: str
 
+    # === 值发现（lookup_values节点） ===
+    lookup_context: str                      # 运行时从数据库探查到的枚举值/实际值文本
+
     # === 性能追踪 ===
     node_timings: dict                       # 各节点耗时 {node_name: elapsed_seconds}

@@ -22,6 +22,7 @@ def run_query(graph, collection, query: str) -> dict:
         "sql_error": None,
         "retry_count": 0,
         "route": "",
+        "lookup_context": "",
         "node_timings": {},
     }
     return graph.invoke(state)

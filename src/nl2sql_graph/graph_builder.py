@@ -6,6 +6,7 @@ from .nodes import recall, rerank, enforce, build_prompt, generate
 from .nodes import execute_sql as execute_node
 from .nodes import validate_result as validate_node
 from .nodes import fix_sql as fix_node
+from .nodes import lookup_values as lookup_node
 
 
 def _timed(name, fn):
@@ -40,12 +41,14 @@ def build_graph(collection):
     builder.add_node("execute_sql", _timed("execute_sql", execute_node.execute_sql))
     builder.add_node("validate_result", _timed("validate_result", validate_node.validate_result))
     builder.add_node("fix_sql", _timed("fix_sql", fix_node.fix_sql))
+    builder.add_node("lookup_values", _timed("lookup_values", lookup_node.lookup_values))
 
     # 原有线性边
     builder.add_edge(START, "recall_tables")
     builder.add_edge("recall_tables", "rerank_tables")
     builder.add_edge("rerank_tables", "enforce_rules")
-    builder.add_edge("enforce_rules", "build_prompt")
+    builder.add_edge("enforce_rules", "lookup_values")
+    builder.add_edge("lookup_values", "build_prompt")
     builder.add_edge("build_prompt", "generate_sql")
 
     # Phase 2: 扩展管道

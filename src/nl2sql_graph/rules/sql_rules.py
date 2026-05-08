@@ -19,7 +19,7 @@ SQL 生成规则：
 # 条件规则文本 — key 为规则名，value 为规则文本
 CONDITIONAL_RULES = {
     "revenue_expense": "- account_type 枚举（小写）：'income','other income','expenses','other expense','accounts receivable (a/p)','accounts payable (a/p)'。筛选收入/费用时 JOIN chart_of_accounts ON businessID + Account = Account_name，用 account_type 过滤",
-    "multi_tenant": "- 多租户 businessID：根据用户查询语义判断。用户泛指"公司""整体""全部业务""汇总"时，不限定 businessID，汇总全部租户。用户明确提及特定业务编号（如"业务3""租户5"）时，才加对应 businessID 过滤",
+    "multi_tenant": "- 多租户 businessID：根据用户查询语义判断。用户泛指【公司】【整体】【全部业务】【汇总】时，不限定 businessID，汇总全部租户。用户明确提及特定业务编号（如【业务3】【租户5】）时，才加对应 businessID 过滤",
     "transaction_type": "- Transaction_TYPE：收入='invoice'，费用='bill'，存款='deposit'",
     "product_category": "- 产品分类：仅当查询涉及 Product_Service_type 产品分类维度时，才 JOIN products 表。按产品分组统计直接用 master_txn_table.Product_Service GROUP BY",
     "employee_status": "- 员工过滤：查询涉及员工状态时，加 Deleted='no' 只取在职员工",
@@ -60,11 +60,13 @@ SQL 修复指引：
 
 
 def match_rules(query: str, triggers=None, conditional_rules=None) -> str:
-    """根据查询文本匹配条件规则，返回拼接后的规则文本。
+    """根据查询文本匹配条件规则，返回拼接后的规则文本（仅 Layer 2 条件规则，不含核心约束）。
 
     对每个 trigger 组，若 query 中命中任一关键词，则激活对应规则。
     返回所有命中规则的拼接文本（换行分隔）。
     """
+    if not query:
+        return ""
     if triggers is None:
         triggers = RULE_TRIGGERS
     if conditional_rules is None:

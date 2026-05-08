@@ -42,6 +42,7 @@ for item in test_queries:
         "sql_error": None,
         "retry_count": 0,
         "route": "",
+        "lookup_context": "",
         "node_timings": {},
     }
     result = graph.invoke(state)

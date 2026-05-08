@@ -1,6 +1,6 @@
 """SQL 修正节点 — LLM 根据错误信息修正 SQL"""
 from ..services.llm import call_llm
-from ..rules.sql_rules import SQL_RULES
+from ..rules.sql_rules import CORE_RULES, RULE_TRIGGERS, CONDITIONAL_RULES, FIX_RULES, match_rules
 
 
 _FIX_TEMPLATE = """## 用户原始查询
@@ -46,13 +46,24 @@ def fix_sql(state: dict) -> dict:
         f"### {t['table_name']}\n{t['schema']}" for t in selected
     )
 
+    lookup = state.get("lookup_context", "")
+    if lookup:
+        schema_context = lookup + "\n\n" + schema_context
+
+    # 三层规则组装：Layer1 + Layer2(按查询匹配) + Layer3(修复专用)
+    rules_text = CORE_RULES.strip()
+    matched = match_rules(state["query"], RULE_TRIGGERS, CONDITIONAL_RULES)
+    if matched:
+        rules_text += "\n" + matched
+    rules_text += "\n" + FIX_RULES.strip()
+
     fix_prompt = _FIX_TEMPLATE.format(
         query=state["query"],
         sql=sql,
         error=error or "空结果",
         error_desc=error_desc,
         schema_context=schema_context,
-        sql_rules=SQL_RULES,
+        sql_rules=rules_text,
     )
 
     try:
