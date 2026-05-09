@@ -1,0 +1,766 @@
+{
+  "summary": {
+    "total": 30,
+    "success": 24,
+    "fail": 6,
+    "success_rate": 80.0,
+    "level_stats": {
+      "Easy": {
+        "total": 9,
+        "success": 8
+      },
+      "Medium": {
+        "total": 7,
+        "success": 7
+      },
+      "Hard": {
+        "total": 14,
+        "success": 9
+      }
+    }
+  },
+  "results": [
+    {
+      "id": 1,
+      "level": "Easy",
+      "query": "我想看一看客户应收账款余额的总览",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.81,
+        "rerank": 14.353,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 2,
+      "level": "Easy",
+      "query": "我想看一看各供应商应付账款余额排名情况",
+      "ground_truth": [
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "selected": [
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.583,
+        "rerank": 16.011,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 3,
+      "level": "Easy",
+      "query": "我想看一看每月收入的变化趋势",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.611,
+        "rerank": 6.378,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 4,
+      "level": "Medium",
+      "query": "我想对比各年度的收入和费用情况",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.631,
+        "rerank": 7.359,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 5,
+      "level": "Easy",
+      "query": "我想分析不同产品服务的销售收入占比",
+      "ground_truth": [
+        "main.master_txn_table",
+        "main.products"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [
+        "main.products"
+      ],
+      "extra": [
+        "main.chart_of_accounts"
+      ],
+      "passed": false,
+      "timings": {
+        "recall": 0.632,
+        "rerank": 10.295,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 6,
+      "level": "Easy",
+      "query": "我想按州查看客户的收入分布情况",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [
+        "main.chart_of_accounts"
+      ],
+      "passed": true,
+      "timings": {
+        "recall": 0.596,
+        "rerank": 12.124,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 7,
+      "level": "Medium",
+      "query": "我想查看完整的交易明细，包含客户、供应商、产品、科目信息；\n“把交易明细拉出来，同时带上科目、客户、供应商、产品这四张维度表的信息——看看每笔交易什么日期、什么类型、多少钱、走的哪个科目、关联的客户是谁、供应商是谁、买了什么产品或服务，还有借贷方金额、未清余额、到期日、应收应付状态。用LEFT JOIN关联，哪怕某个维度信息缺失也能把交易本身带出来，但只保留有客户或者有供应商的交易，按交易日期倒序看最新的50条。”",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.products",
+        "main.vendors"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.products",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.633,
+        "rerank": 13.56,
+        "enforce": 0.001
+      },
+      "warnings": []
+    },
+    {
+      "id": 8,
+      "level": "Medium",
+      "query": "我想看看每月收入相比上月的增长情况；\n\"帮我看看公司每个月进账多少，跟上个月比是多了还是少了，具体多了/少了多少钱、百分之几。从有数据可对比的第二个月开始算，按时间排好，最多看30个月的数据。\"",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.582,
+        "rerank": 7.435,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 9,
+      "level": "Medium",
+      "query": "我想分析客户应收账款的账龄分布，看看有多少逾期",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.542,
+        "rerank": 15.741,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 10,
+      "level": "Medium",
+      "query": "我想分析供应商应付账款的账龄分布",
+      "ground_truth": [
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "selected": [
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.662,
+        "rerank": 8.476,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 11,
+      "level": "Easy",
+      "query": "我想看看各费用科目占总费用的比重；\n“按费用科目分组，统计每个科目的交易笔数和花了多少钱，再看看这笔钱占总费用的百分之几，从高到低累加起来看看累计花了多少、累计占到百分之几，顺便排个名，最后只要花钱最多的前30个费用科目。”",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.619,
+        "rerank": 9.628,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 12,
+      "level": "Hard",
+      "query": "我想深入查看收入前10名客户的交易明细",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.products"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [
+        "main.products"
+      ],
+      "extra": [],
+      "passed": false,
+      "timings": {
+        "recall": 0.543,
+        "rerank": 5.959,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 13,
+      "level": "Easy",
+      "query": "我想按科目类型汇总借贷方金额",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.64,
+        "rerank": 10.788,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 14,
+      "level": "Medium",
+      "query": "我想查看每个季度收入占全年收入的比重",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.602,
+        "rerank": 6.929,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 15,
+      "level": "Hard",
+      "query": "我想看看有哪些超过90天还没结清的应收应付；\n\"查询公司所有逾期超过90天的未清款项，包括应收账款和应付账款两部分，统一展示客户/供应商名称、交易信息、未清余额和逾期天数，按逾期严重程度从高到低排列，最多显示50条。\"；\n\"帮我看看哪些钱该收还没收回来、哪些钱该付还没付出去，都拖了90天以上了。把客户和供应商的名字列出来，告诉我每笔欠了多久、欠多少，按拖得最久的排前面，看前50条就行。\"",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.567,
+        "rerank": 12.993,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 16,
+      "level": "Easy",
+      "query": "我想看看每个员工每月处理了多少交易；\n“按月看看每个员工干了多少活——处理了几笔交易、录了几条分录、总金额多少、平均每笔多大，还有借方贷方各多少，顺便带上人家工号和入职日期，只算正经有创建人的，按最新月份排，同一个月里谁处理的钱多谁排前面，总共看前30条。”",
+      "ground_truth": [
+        "main.employees",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.employees",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.621,
+        "rerank": 19.331,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 17,
+      "level": "Medium",
+      "query": "我想对比主要收入账户在各年份的表现",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.633,
+        "rerank": 6.718,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 18,
+      "level": "Easy",
+      "query": "我想分析客户的购买频率、金额和忠诚度",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.721,
+        "rerank": 18.686,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 19,
+      "level": "Hard",
+      "query": "我想看一份完整的年度利润报表，包含收入、费用、应收应付",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [
+        "main.customers",
+        "main.vendors"
+      ],
+      "passed": true,
+      "timings": {
+        "recall": 0.618,
+        "rerank": 9.271,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 20,
+      "level": "Hard",
+      "query": "我想交叉分析TOP收入账户、头部客户和热门产品的组合数据",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.products"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [
+        "main.products"
+      ],
+      "extra": [],
+      "passed": false,
+      "timings": {
+        "recall": 0.613,
+        "rerank": 12.416,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 21,
+      "level": "Hard",
+      "query": "我想按最近购买时间、购买频次、消费金额给客户打分分层",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.565,
+        "rerank": 18.997,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 22,
+      "level": "Hard",
+      "query": "我想看收入的3月移动平均、12月移动平均、同比增长和环比增长",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.558,
+        "rerank": 8.552,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 23,
+      "level": "Hard",
+      "query": "我想找出每个州收入排名前3的客户",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [
+        "main.chart_of_accounts"
+      ],
+      "passed": true,
+      "timings": {
+        "recall": 0.57,
+        "rerank": 9.7,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 24,
+      "level": "Hard",
+      "query": "我想按获客年份分组看每年还有多少客户在回购",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.6,
+        "rerank": 11.251,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 25,
+      "level": "Hard",
+      "query": "我想按科目类型、客户所在州、年份三个维度交叉分析收入",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.614,
+        "rerank": 12.053,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 26,
+      "level": "Hard",
+      "query": "我想筛选高价值客户并用EXISTS判断他们有怎样的消费特征",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.products"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [
+        "main.chart_of_accounts",
+        "main.products"
+      ],
+      "extra": [],
+      "passed": false,
+      "timings": {
+        "recall": 0.664,
+        "rerank": 11.969,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 27,
+      "level": "Hard",
+      "query": "我想分析客户收入的累计分布和百分位排名，识别头部客户",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.564,
+        "rerank": 10.019,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 28,
+      "level": "Hard",
+      "query": "我想按年度对比应收和应付的前5大客户/供应商余额情况",
+      "ground_truth": [
+        "main.customers",
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "selected": [
+        "main.customers",
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [],
+      "extra": [],
+      "passed": true,
+      "timings": {
+        "recall": 0.602,
+        "rerank": 10.666,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 29,
+      "level": "Hard",
+      "query": "我想分析每月季节因子、去季节化趋势和基于移动平均的预测",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.master_txn_table"
+      ],
+      "selected": [
+        "main.master_txn_table"
+      ],
+      "forced": [],
+      "missing": [
+        "main.chart_of_accounts"
+      ],
+      "extra": [],
+      "passed": false,
+      "timings": {
+        "recall": 0.65,
+        "rerank": 13.796,
+        "enforce": 0.0
+      },
+      "warnings": []
+    },
+    {
+      "id": 30,
+      "level": "Hard",
+      "query": "我想在一个查询中汇总收入TOP科目、费用TOP科目、AR/AP余额等所有核心KPI",
+      "ground_truth": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.products",
+        "main.vendors"
+      ],
+      "selected": [
+        "main.chart_of_accounts",
+        "main.customers",
+        "main.master_txn_table",
+        "main.vendors"
+      ],
+      "forced": [],
+      "missing": [
+        "main.products"
+      ],
+      "extra": [],
+      "passed": false,
+      "timings": {
+        "recall": 0.619,
+        "rerank": 10.215,
+        "enforce": 0.0
+      },
+      "warnings": []
+    }
+  ]
+}

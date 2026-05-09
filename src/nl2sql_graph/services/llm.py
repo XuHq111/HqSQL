@@ -7,7 +7,13 @@ qwen3.x 系列必须使用 MultiModalConversation API
 """
 import dashscope
 
-API_KEY = "sk-fad59201f05146a5988bd4d78a04f3fa"
+import os as _os, sys as _sys
+# 从项目根的环境配置/ 加载 API Key
+_config_dir = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..', '..', '..', '环境配置'))
+if _config_dir not in _sys.path:
+    _sys.path.insert(0, _config_dir)
+from api_keys import DASHSCOPE_API_KEY
+API_KEY = DASHSCOPE_API_KEY
 dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
 
 

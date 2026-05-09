@@ -1,5 +1,6 @@
 import dashscope
 from pymilvus import Collection, connections
+from src.nl2sql_graph.services.llm import API_KEY
 
 connections.connect(host='localhost', port='19530', db_name='HqSQL')
 collection = Collection("tables")
@@ -22,7 +23,7 @@ for query in test_queries:
     resp = dashscope.MultiModalEmbedding.call(
         model="tongyi-embedding-vision-plus-2026-03-06",
         input=[{'text': query}],
-        api_key="sk-fad59201f05146a5988bd4d78a04f3fa"
+        api_key=API_KEY
     )
     if resp.status_code != 200:
         print(f"  Embedding 失败: {resp.code} {resp.message}")

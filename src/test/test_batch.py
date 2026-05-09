@@ -19,7 +19,6 @@ collection = Collection("tables")
 collection.load()
 graph = build_graph(collection)
 
-for item in test_queries:
     qid = item['id']
     query = item['Query']
     level = item['Level']

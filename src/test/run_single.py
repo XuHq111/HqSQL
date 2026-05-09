@@ -6,7 +6,7 @@ from src.nl2sql_graph.graph_builder import build_graph
 from src.nl2sql_graph.state import OverallState
 
 # query = "把交易明细拉出来，同时带上科目、客户、供应商、产品这四张维度表的信息——看看每笔交易什么日期、什么类型、多少钱、走的哪个科目、关联的客户是谁、供应商是谁、买了什么产品或服务，还有借贷方金额、未清余额、到期日、应收应付状态。用LEFT JOIN关联，哪怕某个维度信息缺失也能把交易本身带出来，但只保留有客户或者有供应商的交易，按交易日期倒序看最新的50条。"
-query = "想知道有多少个不同的客户进行过交易"
+query = "我想分析每月季节因子、去季节化趋势和基于移动平均的预测"
 
 connections.connect(host='localhost', port='19530', db_name='HqSQL')
 collection = Collection("tables")
@@ -19,7 +19,7 @@ state: OverallState = {
     "query": query,
     # Stage 0 新增
     "raw_query": "",
-    "skip_clarify": False,
+    "skip_clarify": True,
     "clarify_phase": "init",
     "clarify_round": 0,
     "clarify_analysis": None,

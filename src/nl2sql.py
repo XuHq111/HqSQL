@@ -1,6 +1,6 @@
 """NL2SQL v2 -- LangGraph 入口脚本
 
-对比基线: nl2sql.py（原纯函数实现）
+
 """
 import uuid
 from pymilvus import Collection, connections
