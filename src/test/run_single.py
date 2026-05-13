@@ -6,7 +6,25 @@ from src.nl2sql_graph.graph_builder import build_graph
 from src.nl2sql_graph.state import OverallState
 
 # query = "把交易明细拉出来，同时带上科目、客户、供应商、产品这四张维度表的信息——看看每笔交易什么日期、什么类型、多少钱、走的哪个科目、关联的客户是谁、供应商是谁、买了什么产品或服务，还有借贷方金额、未清余额、到期日、应收应付状态。用LEFT JOIN关联，哪怕某个维度信息缺失也能把交易本身带出来，但只保留有客户或者有供应商的交易，按交易日期倒序看最新的50条。"
-query = "我想分析每月季节因子、去季节化趋势和基于移动平均的预测"
+query = """业务需求（二号业务线）：
+
+高价值客户定义（看所有业务线的发票数据，不限本业务线）：
+
+取客户名正常的发票，按客户汇总总金额。
+
+若某客户的总金额 > 所有发票平均金额的2倍，即为高价值客户。
+
+筛选与关联：
+
+只保留客户资料表中属于“二号业务线”的客户（按客户名匹配），取出其计费州。
+
+输出前30名：按发票总金额降序，取前30名客户，展示：
+
+客户名称、所在州、发票总金额、发票张数、最大单笔金额
+
+是否买过服务类产品（从交易关联产品表判断，不限交易类型）
+
+客户类型：从无“账单”交易为“纯收入客户”，否则“有费用记录”"""
 
 connections.connect(host='localhost', port='19530', db_name='HqSQL')
 collection = Collection("tables")
@@ -84,6 +102,14 @@ if final.get("forced_names"):
     print(f"[ENFORCE] forced: {final['forced_names']}")
 if final.get("warnings"):
     print(f"[WARN] {final['warnings']}")
+
+reqs = final.get("requirement_items", [])
+if reqs:
+    print(f"\n--- 需求分解 ({len(reqs)}项) ---")
+    for r in reqs:
+        print(f"  [{r.get('type', '?')}] {r.get('desc', '')}")
+else:
+    print("\n--- 需求分解: (空) ---")
 
 sql = final['sql']
 if sql.startswith('```'):

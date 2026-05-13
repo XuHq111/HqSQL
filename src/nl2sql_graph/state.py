@@ -45,6 +45,14 @@ class OverallState(TypedDict):
     retry_count: int
     route: str
 
+    # === 语义校验 ===
+    requirement_items: List[Dict]            # [{"id":1, "desc":"...", "type":"filter"}, ...]
+    semantic_pass: bool                     # 先验语义校验是否通过
+    semantic_checks: List[Dict]             # [{req_id, desc, covered: bool, reason}, ...]
+    gap_list: List[Dict]                    # 缺口清单 [{req_id, desc, suggestion}, ...]
+    fix_source: str                         # fix_agent 触发来源："syntax" | "semantic_gap"
+    semantic_retry_count: int               # 语义修复尝试次数（上限1次，防死循环）
+
     # === 值发现（lookup_values节点） ===
     lookup_context: str                      # 运行时从数据库探查到的枚举值/实际值文本
 

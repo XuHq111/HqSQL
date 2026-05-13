@@ -7,8 +7,9 @@ from .nodes import clarify as clarify_node
 from .nodes import recall, rerank, enforce, build_prompt, generate
 from .nodes import execute_sql as execute_node
 from .nodes import validate_result as validate_node
-from .nodes import fix_sql as fix_node
+from .nodes import fix_agent as fix_node
 from .nodes import lookup_values as lookup_node
+from .nodes import semantic_validate as semantic_node
 
 
 def _timed(name, fn):
@@ -50,8 +51,9 @@ def build_graph(collection):
     # Phase 2: 新增 3 个节点
     builder.add_node("execute_sql", _timed("execute_sql", execute_node.execute_sql))
     builder.add_node("validate_result", _timed("validate_result", validate_node.validate_result))
-    builder.add_node("fix_sql", _timed("fix_sql", fix_node.fix_sql))
+    builder.add_node("fix_agent", _timed("fix_agent", fix_node.fix_agent))
     builder.add_node("lookup_values", _timed("lookup_values", lookup_node.lookup_values))
+    builder.add_node("semantic_validate", _timed("semantic_validate", semantic_node.validate_semantics))
 
     # Stage 0 入口 + 条件路由
     builder.add_edge(START, "clarify_query")
@@ -76,7 +78,19 @@ def build_graph(collection):
     builder.add_edge("build_prompt", "generate_sql")
 
     # Phase 2: 扩展管道
-    builder.add_edge("generate_sql", "execute_sql")
+    builder.add_edge("generate_sql", "semantic_validate")
+    builder.add_conditional_edges(
+        "semantic_validate",
+        lambda state: (
+            "pass" if state.get("semantic_pass", True) or state.get("semantic_retry_count", 0) >= 1
+            else "fail"  # 首次语义校验失败 → 允许修复一次
+        ),
+        {
+            "pass": "execute_sql",
+            "fail": "fix_agent",
+        }
+    )
+
     builder.add_edge("execute_sql", "validate_result")
 
     # 条件路由：validate_result.route → END 或 fix_sql
@@ -85,11 +99,18 @@ def build_graph(collection):
         lambda state: state["route"],
         {
             "end": END,
-            "retry": "fix_sql",
+            "retry": "fix_agent",
         }
     )
 
-    # fix_sql 修正后回到 generate_sql 重跑完整 Stage 2
-    builder.add_edge("fix_sql", "generate_sql")
+    # fix_agent 修复后条件路由：语义修复走 generate_sql 重校验，语法修复直连 execute_sql
+    builder.add_conditional_edges(
+        "fix_agent",
+        lambda state: "generate_sql" if state.get("fix_source") == "semantic_gap" else "execute_sql",
+        {
+            "generate_sql": "generate_sql",
+            "execute_sql": "execute_sql",
+        }
+    )
 
     return builder.compile(checkpointer=InMemorySaver())

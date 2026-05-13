@@ -1,16 +1,15 @@
-"""SQL 修复 Agent 节点 — 代码诊断 + Markdown Skill + ReAct 循环智能修复 SQL 错误
-
-与 fix_sql.py 的区别：
-- fix_sql.py：单次 LLM 调用修复（简单、直接）
-- fix_agent.py：代码诊断 → 查数据库事实 → 选 Skill → 可选自动修复 → ReAct 循环（智能、多轮）
-"""
+"""SQL 修复 Agent 节点 -- 代码诊断 + Markdown Skill + ReAct 循环智能修复 SQL 错误"""
 import os
 import re
 import sqlite3
 import difflib
 from contextlib import closing
-from ..services.llm import call_llm
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from ..services.llm import plus_model
 from ..rules.sql_rules import CORE_RULES
+from .execute_sql import execute_sql as _execute_sql_node
 
 # ============================================================
 # 常量
@@ -23,31 +22,35 @@ _SKILL_MAP = {
     "column_not_found": "fix_column.md",
     "empty_result":     "fix_empty.md",
     "syntax_error":     "fix_syntax.md",
+    "semantic_gap":     "fix_semantic.md",
 }
 _DEFAULT_SKILL = "fix_general.md"
+
+# ============================================================
+# 管道：接收已构建好的 prompt，调用 plus 模型
+# ============================================================
+_prompt = ChatPromptTemplate.from_messages([("human", "{text}")])
+_chain = _prompt | plus_model | StrOutputParser()
+
 
 # ============================================================
 # 诊断函数
 # ============================================================
 
 def _diagnose(state: dict) -> tuple:
-    """从 state 中提取 sql_error 并诊断错误类型。
+    """从 state 中提取 sql_error 或 gap_list 并诊断类型。"""
+    gap_list = state.get("gap_list")
+    if gap_list:
+        return ("semantic_gap", gap_list)
 
-    Returns:
-        (error_type, error_detail)
-        error_type: "column_not_found" | "syntax_error" | "empty_result" | "unknown"
-        error_detail: 捕获的详细信息（列名、错误摘要等），可能为 None
-    """
     error = state.get("sql_error")
     if not error:
         return ("empty_result", None)
 
-    # 列名不存在
     m = re.search(r'no such column[:\s]+(\S+)', error, re.IGNORECASE)
     if m:
         return ("column_not_found", m.group(1))
 
-    # 语法错误
     if re.search(r'(syntax error|near\s+"|unrecognized)', error, re.IGNORECASE):
         return ("syntax_error", error[:200])
 
@@ -55,14 +58,7 @@ def _diagnose(state: dict) -> tuple:
 
 
 def _diagnose_from_error(error: str) -> tuple:
-    """从错误字符串直接诊断（用于 ReAct 循环中重新诊断）。
-
-    Args:
-        error: 错误字符串（如 SQLite 异常消息）
-
-    Returns:
-        (error_type, error_detail)
-    """
+    """从错误字符串直接诊断（用于 ReAct 循环中重新诊断）。"""
     if not error:
         return ("empty_result", None)
 
@@ -81,19 +77,7 @@ def _diagnose_from_error(error: str) -> tuple:
 # ============================================================
 
 def _gather_facts(state: dict, error_type: str, error_detail: str | None) -> dict:
-    """查询 SQLite 获取表结构事实，为修复提供准确信息。
-
-    - 对所有 selected 表执行 PRAGMA table_info 获取真实列名
-    - 对 column_not_found 错误，执行模糊匹配尝试自动修复
-
-    Args:
-        state: 全局状态
-        error_type: 错误类型
-        error_detail: 错误详情（如错误的列名）
-
-    Returns:
-        facts dict，包含 columns_by_table、actual_columns 等字段
-    """
+    """查询 SQLite 获取表结构事实，为修复提供准确信息。"""
     facts: dict = {}
     selected_names = state.get("selected_names", [])
 
@@ -103,12 +87,11 @@ def _gather_facts(state: dict, error_type: str, error_detail: str | None) -> dic
     with closing(sqlite3.connect(_DB_PATH)) as conn:
         cur = conn.cursor()
         for table_name in selected_names:
-            # 去掉 "main." 前缀以执行 PRAGMA
             raw_name = table_name.replace("main.", "", 1) if table_name.startswith("main.") else table_name
             try:
                 cur.execute(f"PRAGMA table_info('{raw_name}')")
                 rows = cur.fetchall()
-                cols = [r[1] for r in rows]  # r[1] 是列名
+                cols = [r[1] for r in rows]
             except Exception:
                 cols = []
             columns_by_table[table_name] = cols
@@ -116,30 +99,26 @@ def _gather_facts(state: dict, error_type: str, error_detail: str | None) -> dic
 
     facts["columns_by_table"] = columns_by_table
 
-    # 构建可读的实际列名文本
     lines = []
     for tname, cols in columns_by_table.items():
         lines.append(f"表 {tname} 的实际列名：{', '.join(cols)}")
     facts["actual_columns"] = "\n".join(lines)
 
-    # 列名错误：模糊匹配 → 自动修复
     facts["wrong_col"] = ""
     facts["suggested_col"] = ""
     facts["auto_fix_sql"] = None
+    facts["gap_list"] = error_detail if error_type == "semantic_gap" else []
 
     if error_type == "column_not_found" and error_detail:
         wrong_col = error_detail
-        # 去掉表别名前缀（如 t1.Credit → Credit）
         col_name = wrong_col.split(".")[-1] if "." in wrong_col else wrong_col
         facts["wrong_col"] = col_name
 
-        # 去重后做模糊匹配
-        unique_cols = list(dict.fromkeys(all_columns))  # 保序去重
+        unique_cols = list(dict.fromkeys(all_columns))
         matches = difflib.get_close_matches(col_name, unique_cols, n=1, cutoff=0.6)
         if matches:
             suggested = matches[0]
             facts["suggested_col"] = suggested
-            # 正则替换 SQL 中的错误列名
             sql = state.get("sql", "")
             pattern = r'\b' + re.escape(col_name) + r'\b'
             fixed_sql = re.sub(pattern, suggested, sql)
@@ -155,14 +134,7 @@ def _gather_facts(state: dict, error_type: str, error_detail: str | None) -> dic
 # ============================================================
 
 def _load_skill(filename: str) -> str:
-    """读取 Markdown Skill 文件内容。
-
-    Args:
-        filename: Skill 文件名（如 "fix_column.md"）
-
-    Returns:
-        Skill 文件的完整文本内容
-    """
+    """读取 Markdown Skill 文件内容。"""
     path = os.path.join(_SKILL_DIR, filename)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
@@ -173,17 +145,40 @@ def _load_skill(filename: str) -> str:
 # ============================================================
 
 def _build_schema_context(state: dict) -> str:
-    """从 state 中提取已选表的 DDL schema，按选中顺序排列。
-
-    Returns:
-        格式化的表结构文本
-    """
+    """从 state 中提取已选表的 DDL schema，按选中顺序排列。"""
     selected = [t for t in state.get("all_tables", []) if t["table_name"] in state.get("selected_names", [])]
     name_order = {n: i for i, n in enumerate(state.get("selected_names", []))}
     selected.sort(key=lambda t: name_order.get(t["table_name"], 999))
     return "\n\n".join(
         f"### {t['table_name']}\n{t['schema']}" for t in selected
     )
+
+
+# ============================================================
+# 缺口清单文本构建
+# ============================================================
+
+def _build_gap_list_text(gap_list: list) -> str:
+    """将缺口清单格式化为 LLM 可读文本。"""
+    if not gap_list:
+        return ""
+    lines = ["以下需求项在当前 SQL 中缺失："]
+    for g in gap_list:
+        lines.append(f"- [需求{g.get('req_id', '?')}] {g.get('desc', '')}")
+        if g.get("suggestion"):
+            lines.append(f"  建议: {g.get('suggestion')}")
+    return "\n".join(lines)
+
+
+def _build_requirement_context(state: dict) -> str:
+    """构建需求清单摘要，让修复 LLM 知道必须保留哪些语义。"""
+    reqs = state.get("requirement_items", [])
+    if not reqs:
+        return ""
+    lines = ["## 原始查询需求清单（修复时必须保留）"]
+    for r in reqs:
+        lines.append(f"- [{r.get('type', '?')}] {r.get('desc', '')}")
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -194,15 +189,6 @@ def _build_prompt(state: dict, skill_md: str, facts: dict, history: str = "") ->
     """构建发送给 LLM 的修复 prompt。
 
     将 skill.md 中的占位符填充为实际值，如有历史记录则前置。
-
-    Args:
-        state: 全局状态
-        skill_md: Skill 文件内容（含 {placeholder} 占位符）
-        facts: 事实字典（_gather_facts 的返回值）
-        history: 前几轮修复的历史记录文本，空字符串表示第一轮
-
-    Returns:
-        完整的 prompt 字符串
     """
     format_vars = {
         "query": state.get("query", ""),
@@ -214,6 +200,8 @@ def _build_prompt(state: dict, skill_md: str, facts: dict, history: str = "") ->
         "wrong_col": facts.get("wrong_col", ""),
         "suggested_col": facts.get("suggested_col", ""),
         "core_rules": CORE_RULES.strip(),
+        "gap_list_text": _build_gap_list_text(facts.get("gap_list", [])),
+        "requirement_context": _build_requirement_context(state),
     }
 
     prompt = skill_md.format(**format_vars)
@@ -234,14 +222,7 @@ def _build_prompt(state: dict, skill_md: str, facts: dict, history: str = "") ->
 # ============================================================
 
 def _clean_md(sql: str) -> str:
-    """去除 LLM 输出中可能包裹的 Markdown 代码围栏标记。
-
-    Args:
-        sql: LLM 原始输出
-
-    Returns:
-        清理后的纯 SQL 文本
-    """
+    """去除 LLM 输出中可能包裹的 Markdown 代码围栏标记。"""
     s = sql.strip()
     if s.startswith("```"):
         lines = s.split("\n")
@@ -257,61 +238,20 @@ def _clean_md(sql: str) -> str:
 # ============================================================
 
 def _test_execute(sql: str) -> tuple:
-    """在 SQLite 上测试执行 SQL。
-
-    Args:
-        sql: 待测试的 SQL 语句
-
-    Returns:
-        (True, None) 如果执行成功
-        (False, error_string) 如果执行失败
-    """
-    if not sql or not sql.strip():
-        return (False, "SQL 为空")
-
-    try:
-        with closing(sqlite3.connect(_DB_PATH)) as conn:
-            cur = conn.cursor()
-            cur.execute(sql)
-            cur.fetchall()
-        return (True, None)
-    except Exception as e:
-        return (False, str(e))
+    """委托 execute_sql 节点测试执行，复用其安全守卫（SELECT-only 检查）。"""
+    result = _execute_sql_node({"sql": sql})
+    if result.get("sql_error"):
+        return (False, result["sql_error"])
+    return (True, None)
 
 
 # ============================================================
 # 返回值构建
 # ============================================================
 
-def _build_return(state: dict, fixed_sql: str, facts: dict | None = None) -> dict:
-    """构建节点返回值，包含修正后的 SQL 和增强 prompt。
-
-    增强 prompt 会追加到原 prompt 后面，供下游 generate_sql 节点使用。
-
-    Args:
-        state: 全局状态
-        fixed_sql: 修正后的 SQL
-        facts: 事实字典（当前未使用，保留以兼容调用方）
-
-    Returns:
-        {"sql": fixed_sql, "prompt": augmented_prompt}
-    """
-    sql = state.get("sql", "")
-    error = state.get("sql_error", "")
-
-    augmented_prompt = (
-        state.get("prompt", "")
-        + "\n\n## 上一轮 SQL 执行失败，已修正\n"
-        + f"### 原 SQL（错误）\n```\n{sql}\n```\n"
-        + f"### 执行错误\n{error or '空结果'}\n"
-        + f"### 修正后 SQL\n```\n{fixed_sql}\n```\n"
-        + "请基于修正版本和完整规则重新生成最终 SQL。只输出 SQL。"
-    )
-
-    return {
-        "sql": fixed_sql,
-        "prompt": augmented_prompt,
-    }
+def _build_return(fixed_sql: str, fix_source: str = "syntax") -> dict:
+    """构建节点返回值，直接输出修正后的 SQL + 修复来源标记。"""
+    return {"sql": fixed_sql, "fix_source": fix_source}
 
 
 # ============================================================
@@ -319,43 +259,39 @@ def _build_return(state: dict, fixed_sql: str, facts: dict | None = None) -> dic
 # ============================================================
 
 def fix_agent(state: dict) -> dict:
-    """SQL 修复 Agent 节点 — 智能诊断并修复 SQL 错误。
+    """SQL 修复 Agent 节点 -- 智能诊断并修复 SQL 错误。
 
     流程：
-    1. 诊断错误类型（正则，零 LLM 调用）
-    2. 收集数据库事实（PRAGMA，零 LLM 调用）
-    3. 选择对应的 Markdown Skill 文件
-    4. 高置信度列名错误 → 直接自动修复（零 LLM 调用）
-    5. 启动 ReAct 循环（最多 2 轮）：
-       a. 读取 skill.md + 填充占位符 → prompt
-       b. LLM 生成修复 SQL
-       c. 在 SQLite 上测试执行
-       d. 成功 → 返回
-       e. 失败 → 重新诊断新错误类型
-          - 同类型 → 累积历史，继续用原 skill
-          - 不同类型 → 切换 skill，重建 prompt
-
-    Args:
-        state: 全局状态字典（OverallState 的运行时表示）
-
-    Returns:
-        {"sql": fixed_sql, "prompt": augmented_prompt} 用于后续 generate_sql 节点
-        如果 LLM 调用失败，返回 {"sql": state.get("sql", "")}
+    1. 诊断错误类型（语义缺口 > 语法错误 > 列名错误 > 空结果）
+    2. 语义缺口路径：加载 fix_semantic.md，注入 gap_list，LLM 补全
+    3. 语法错误路径：收集数据库事实 → 选 Skill → 自动修复 / ReAct 循环
     """
     # Step 1: 诊断错误类型
     error_type, error_detail = _diagnose(state)
 
-    # Step 2: 收集数据库事实
+    # Step 2: 语义缺口 -- 快速路径
+    if error_type == "semantic_gap":
+        facts = {"gap_list": error_detail}
+        skill_md = _load_skill("fix_semantic.md")
+        prompt = _build_prompt(state, skill_md, facts, "")
+        try:
+            fixed_sql = _chain.invoke({"text": prompt})
+            fixed_sql = _clean_md(fixed_sql)
+        except Exception:
+            return _build_return(state.get("sql", ""), "semantic_gap")
+        return _build_return(fixed_sql, "semantic_gap")
+
+    # Step 3: 收集数据库事实
     facts = _gather_facts(state, error_type, error_detail)
 
-    # Step 3: 选择 Skill 文件
+    # Step 4: 选择 Skill 文件
     skill_path = _SKILL_MAP.get(error_type, _DEFAULT_SKILL)
 
-    # Step 4: 高置信度列名自动修复（零 LLM 调用）
+    # Step 5: 高置信度列名自动修复（零 LLM 调用）
     if error_type == "column_not_found" and facts.get("auto_fix_sql"):
-        return _build_return(state, facts["auto_fix_sql"], facts)
+        return _build_return(facts["auto_fix_sql"], "syntax")
 
-    # Step 5: ReAct 循环
+    # Step 6: ReAct 循环
     history = ""
     current_skill_md = _load_skill(skill_path)
     facts["current_error_type"] = error_type
@@ -366,14 +302,14 @@ def fix_agent(state: dict) -> dict:
         prompt = _build_prompt(state, current_skill_md, facts, history)
 
         try:
-            fixed_sql = call_llm(prompt)
+            fixed_sql = _chain.invoke({"text": prompt})
             fixed_sql = _clean_md(fixed_sql)
         except Exception:
-            break  # LLM 调用失败，返回当前状态
+            break
 
         test_ok, test_error = _test_execute(fixed_sql)
         if test_ok:
-            return _build_return(state, fixed_sql, facts)
+            return _build_return(fixed_sql, "syntax")
 
         # 重新诊断
         new_type, new_detail = _diagnose_from_error(test_error)
@@ -384,10 +320,8 @@ def fix_agent(state: dict) -> dict:
         )
 
         if new_type == facts["current_error_type"]:
-            # 同类型错误，保留当前 skill 继续尝试
             facts["error_detail"] = new_detail
         else:
-            # 不同类型错误 → 切换 skill
             facts["current_error_type"] = new_type
             facts["error_detail"] = new_detail
             new_path = _SKILL_MAP.get(new_type, _DEFAULT_SKILL)
@@ -395,5 +329,4 @@ def fix_agent(state: dict) -> dict:
             history += f"(错误类型变为 {new_type}，已切换修复策略)\n"
             facts = {**facts, **_gather_facts(state, new_type, new_detail)}
 
-    # 循环耗尽：返回最后一轮的修复结果
-    return _build_return(state, fixed_sql, facts)
+    return _build_return(fixed_sql, "syntax")

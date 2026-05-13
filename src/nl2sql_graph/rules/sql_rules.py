@@ -19,8 +19,8 @@ SQL 生成规则：
 # 条件规则文本 — key 为规则名，value 为规则文本
 CONDITIONAL_RULES = {
     "revenue_expense": "- account_type 枚举（小写）：'income','other income','expenses','other expense','accounts receivable (a/p)','accounts payable (a/p)'。筛选收入/费用时 JOIN chart_of_accounts ON businessID + Account = Account_name，用 account_type 过滤",
-    "multi_tenant": "- 多租户 businessID：根据用户查询语义判断。用户泛指【公司】【整体】【全部业务】【汇总】时，不限定 businessID，汇总全部租户。用户明确提及特定业务编号（如【业务3】【租户5】）时，才加对应 businessID 过滤",
-    "transaction_type": "- Transaction_TYPE：收入='invoice'，费用='bill'，存款='deposit'",
+    "multi_tenant": "- 多租户 businessID：根据用户查询语义判断。用户泛指【公司】【整体】【全部业务】【汇总】【不限业务线】时，不限定 businessID，汇总全部租户。用户明确提及特定业务编号时，才加对应 businessID 过滤。重要：当查询同时要求\"跨业务线计算指标+只展示某业务线客户\"时（如\"从全业务线发票中找高价值客户，但只保留二号业务线客户\"），指标计算部分（聚合/子查询/阈值）不加 businessID 过滤，仅在最终展示层通过 JOIN 客户表限定 businessID",
+    "transaction_type": "- Transaction_TYPE 枚举（小写）：'invoice'（发票/收入类交易）、'bill'（账单，可能关联费用科目也可能不是）、'deposit'（存款）。判断客户是否有账单交易（Transaction_TYPE='bill'）时，不要额外加 Account_type 过滤，账单类型本身不等于费用科目",
     "product_category": "- 产品分类：仅当查询涉及 Product_Service_type 产品分类维度时，才 JOIN products 表。按产品分组统计直接用 master_txn_table.Product_Service GROUP BY",
     "employee_status": "- 员工过滤：查询涉及员工状态时，加 Deleted='no' 只取在职员工",
     "payment_method": "- 支付方式：查询涉及信用卡/支付方式时 JOIN payment_method 表",

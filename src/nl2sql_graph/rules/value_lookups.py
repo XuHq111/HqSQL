@@ -33,4 +33,26 @@ VALUE_LOOKUP_CONFIG = [
         ),
         "label": "Account_type 枚举值（会计科目大类，筛选收入/费用时用此字段）",
     },
+    {
+        "keywords": [
+            "产品类型", "产品分类", "服务类", "service", "product type",
+            "product category", "Product_Service_type",
+        ],
+        "query": (
+            "SELECT DISTINCT Product_Service_type FROM main.products "
+            "ORDER BY Product_Service_type"
+        ),
+        "label": "Product_Service_type 枚举值（注意大小写必须与数据库一致）",
+    },
+    {
+        "keywords": [
+            "发票", "账单", "存款", "交易类型", "Transaction_TYPE",
+            "invoice", "bill", "deposit", "transaction type",
+        ],
+        "query": (
+            "SELECT DISTINCT Transaction_TYPE FROM main.master_txn_table "
+            "ORDER BY Transaction_TYPE"
+        ),
+        "label": "Transaction_TYPE 枚举值（注意大小写必须与数据库一致）",
+    },
 ]

@@ -32,6 +32,29 @@ def build_prompt(state: dict) -> dict:
         rules_text += "\n" + matched
     lines.append(rules_text)
     lines.append("## 任务\n")
-    lines.append("根据上述表结构和依赖规则生成 SQLite SQL 语句。只输出 SQL，不要解释。")
+    lines.append("""请分两步完成：
+
+**第一步：需求分解**
+仔细阅读用户查询，将其拆解为可逐条核对的原子需求。每条需求包含：
+- id: 序号
+- desc: 需求描述（用中文，直接可对照 SQL 检查）
+- type: 类型（filter | join | aggregate | subquery | having | order_limit | case_when | column）
+
+**第二步：SQL 生成**
+对照需求清单逐条实现，确保每一条需求在 SQL 中都有对应的子句。
+
+输出格式（严格遵守，不要用 markdown 代码块包裹 JSON）：
+{
+  "requirements": [
+    {"id": 1, "desc": "限定 businessID = 2", "type": "filter"},
+    {"id": 2, "desc": "仅筛选交易类型为发票的记录", "type": "filter"}
+  ],
+  "sql": "SELECT ..."
+}
+
+注意：
+- requirements 数组必须完整，不遗漏用户查询中的任何需求
+- sql 中的每一段（WHERE/JOIN/GROUP BY/HAVING/ORDER BY/LIMIT/子查询/CASE WHEN）都应对应 requirements 中的一条或多条
+- 只输出上述 JSON，不要额外解释""")
 
     return {"prompt": "\n".join(lines)}
