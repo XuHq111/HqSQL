@@ -111,8 +111,14 @@ def clarify_query(state: dict) -> dict:
                 "clarify_phase": "confirmed",
             }
 
-        # 调用 interrupt() 暂停图执行
-        from langgraph.types import interrupt
+        # 回调模式：通过 _clarify_callback 获取用户响应
+        callback = state.get("_clarify_callback")
+        if callback is None:
+            # 无回调 → 直接确认（兼容 CLI 模式 / skip 模式）
+            return {
+                "query": analysis.get("enhanced_query", state.get("raw_query", "")),
+                "clarify_phase": "confirmed",
+            }
 
         payload = {
             "enhanced_query": analysis.get("enhanced_query", ""),
@@ -120,9 +126,9 @@ def clarify_query(state: dict) -> dict:
             "round": round_num,
         }
 
-        user_input = interrupt(payload)
+        user_input = callback(payload)
 
-        # 按回车 -> 直接确认当前增强查询，不额外调 LLM
+        # 按回车 / 空输入 -> 直接确认
         if not user_input.strip():
             return {
                 "query": analysis.get("enhanced_query", state.get("raw_query", "")),
