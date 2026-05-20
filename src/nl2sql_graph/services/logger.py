@@ -62,10 +62,11 @@ class SessionLogger:
             line["error"] = error
         self._write_line(line)
 
-    def log_llm(self, model: str, prompt: str, response: str, elapsed: float):
+    def log_llm(self, model: str, node: str, prompt: str, response: str, elapsed: float):
         """记录一次 LLM 调用（缓存到当前节点）。"""
         self._llm_buffer.append({
             "model": model,
+            "node": node,
             "elapsed": round(elapsed, 3),
             "prompt": prompt[:4000],
             "response": response[:4000],
