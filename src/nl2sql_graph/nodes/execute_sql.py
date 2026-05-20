@@ -1,6 +1,8 @@
 """SQL 执行节点 -- 通过适配器在目标数据库上执行 state["sql"]"""
 import re
 
+from ..services.db_adapter import BaseDBAdapter
+
 _FORBIDDEN_KEYWORDS = [
     "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
     "REPLACE", "TRUNCATE", "ATTACH", "DETACH", "PRAGMA",
@@ -31,7 +33,7 @@ def _clean_sql(sql: str) -> str:
     return s
 
 
-def make_execute_sql(adapter):
+def make_execute_sql(adapter: BaseDBAdapter):
     """工厂函数：返回绑定 adapter 的 execute_sql 节点函数"""
 
     def execute_sql(state: dict) -> dict:
@@ -42,7 +44,7 @@ def make_execute_sql(adapter):
             return {"sql_error": "SQL 为空", "sql_result": None}
 
         if not _is_select_only(sql):
-            return {"sql_error": "仅允许 SELECT 语句", "sql_result": None}
+            return {"sql_error": "仅允许 SELECT 语句，检测到非查询操作，请重新生成纯 SELECT", "sql_result": None}
 
         try:
             headers, rows = adapter.execute(sql)
