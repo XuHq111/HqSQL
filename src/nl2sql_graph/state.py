@@ -1,5 +1,5 @@
 """NL2SQL LangGraph 共享状态定义"""
-from typing import TypedDict, List, Optional, Dict
+from typing import TypedDict, List, Optional, Dict, Any
 
 
 class RecallItem(TypedDict, total=False):
@@ -58,3 +58,7 @@ class OverallState(TypedDict):
 
     # === 性能追踪 ===
     node_timings: dict                       # 各节点耗时 {node_name: elapsed_seconds}
+
+    # === 内部运行时依赖（由 Web/CLI 入口注入，不参与序列化） ===
+    _clarify_callback: Optional[Any]          # Web 模式下的澄清回调函数
+    _adapter: Optional[Any]                   # 数据库适配器实例
