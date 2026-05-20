@@ -1,20 +1,15 @@
 """SQL 修复 Agent 节点 -- 代码诊断 + Markdown Skill + ReAct 循环智能修复 SQL 错误"""
 import os
 import re
-import sqlite3
 import difflib
-from contextlib import closing
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from ..services.llm import plus_model
 from ..rules.sql_rules import CORE_RULES
-from .execute_sql import execute_sql as _execute_sql_node
-
 # ============================================================
 # 常量
 # ============================================================
-_DB_PATH = r"E:\sql数据集\accounting.sqlite"
 _MAX_INNER_RETRIES = 2
 
 _SKILL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
@@ -76,26 +71,19 @@ def _diagnose_from_error(error: str) -> tuple:
 # 事实收集函数
 # ============================================================
 
-def _gather_facts(state: dict, error_type: str, error_detail: str | None) -> dict:
-    """查询 SQLite 获取表结构事实，为修复提供准确信息。"""
+def _gather_facts(state: dict, error_type: str, error_detail: str | None, adapter) -> dict:
+    """通过适配器获取表结构事实，为修复提供准确信息。"""
     facts: dict = {}
     selected_names = state.get("selected_names", [])
 
     columns_by_table: dict[str, list] = {}
     all_columns: list[str] = []
 
-    with closing(sqlite3.connect(_DB_PATH)) as conn:
-        cur = conn.cursor()
-        for table_name in selected_names:
-            raw_name = table_name.replace("main.", "", 1) if table_name.startswith("main.") else table_name
-            try:
-                cur.execute(f"PRAGMA table_info('{raw_name}')")
-                rows = cur.fetchall()
-                cols = [r[1] for r in rows]
-            except Exception:
-                cols = []
-            columns_by_table[table_name] = cols
-            all_columns.extend(cols)
+    for table_name in selected_names:
+        raw_name = table_name.replace("main.", "", 1) if table_name.startswith("main.") else table_name
+        cols = adapter.get_columns(raw_name)
+        columns_by_table[table_name] = cols
+        all_columns.extend(cols)
 
     facts["columns_by_table"] = columns_by_table
 
@@ -234,18 +222,6 @@ def _clean_md(sql: str) -> str:
 
 
 # ============================================================
-# SQL 测试执行
-# ============================================================
-
-def _test_execute(sql: str) -> tuple:
-    """委托 execute_sql 节点测试执行，复用其安全守卫（SELECT-only 检查）。"""
-    result = _execute_sql_node({"sql": sql})
-    if result.get("sql_error"):
-        return (False, result["sql_error"])
-    return (True, None)
-
-
-# ============================================================
 # 返回值构建
 # ============================================================
 
@@ -255,78 +231,89 @@ def _build_return(fixed_sql: str, fix_source: str = "syntax") -> dict:
 
 
 # ============================================================
-# 主入口：fix_agent
+# 主入口：make_fix_agent 工厂函数
 # ============================================================
 
-def fix_agent(state: dict) -> dict:
-    """SQL 修复 Agent 节点 -- 智能诊断并修复 SQL 错误。
+def make_fix_agent(adapter, execute_sql_node):
+    """工厂函数，返回绑定 adapter 和 execute_sql 的 fix_agent 节点"""
 
-    流程：
-    1. 诊断错误类型（语义缺口 > 语法错误 > 列名错误 > 空结果）
-    2. 语义缺口路径：加载 fix_semantic.md，注入 gap_list，LLM 补全
-    3. 语法错误路径：收集数据库事实 → 选 Skill → 自动修复 / ReAct 循环
-    """
-    # Step 1: 诊断错误类型
-    error_type, error_detail = _diagnose(state)
+    def _test_execute(sql: str) -> tuple:
+        result = execute_sql_node({"sql": sql})
+        if result.get("sql_error"):
+            return (False, result["sql_error"])
+        return (True, None)
 
-    # Step 2: 语义缺口 -- 快速路径
-    if error_type == "semantic_gap":
-        facts = {"gap_list": error_detail}
-        skill_md = _load_skill("fix_semantic.md")
-        prompt = _build_prompt(state, skill_md, facts, "")
-        try:
-            fixed_sql = _chain.invoke({"text": prompt})
-            fixed_sql = _clean_md(fixed_sql)
-        except Exception:
-            return _build_return(state.get("sql", ""), "semantic_gap")
-        return _build_return(fixed_sql, "semantic_gap")
+    def fix_agent(state: dict) -> dict:
+        """SQL 修复 Agent 节点 -- 智能诊断并修复 SQL 错误。
 
-    # Step 3: 收集数据库事实
-    facts = _gather_facts(state, error_type, error_detail)
+        流程：
+        1. 诊断错误类型（语义缺口 > 语法错误 > 列名错误 > 空结果）
+        2. 语义缺口路径：加载 fix_semantic.md，注入 gap_list，LLM 补全
+        3. 语法错误路径：收集数据库事实 → 选 Skill → 自动修复 / ReAct 循环
+        """
+        # Step 1: 诊断错误类型
+        error_type, error_detail = _diagnose(state)
 
-    # Step 4: 选择 Skill 文件
-    skill_path = _SKILL_MAP.get(error_type, _DEFAULT_SKILL)
+        # Step 2: 语义缺口 -- 快速路径
+        if error_type == "semantic_gap":
+            facts = {"gap_list": error_detail}
+            skill_md = _load_skill("fix_semantic.md")
+            prompt = _build_prompt(state, skill_md, facts, "")
+            try:
+                fixed_sql = _chain.invoke({"text": prompt})
+                fixed_sql = _clean_md(fixed_sql)
+            except Exception:
+                return _build_return(state.get("sql", ""), "semantic_gap")
+            return _build_return(fixed_sql, "semantic_gap")
 
-    # Step 5: 高置信度列名自动修复（零 LLM 调用）
-    if error_type == "column_not_found" and facts.get("auto_fix_sql"):
-        return _build_return(facts["auto_fix_sql"], "syntax")
+        # Step 3: 收集数据库事实
+        facts = _gather_facts(state, error_type, error_detail, adapter)
 
-    # Step 6: ReAct 循环
-    history = ""
-    current_skill_md = _load_skill(skill_path)
-    facts["current_error_type"] = error_type
-    facts["error_detail"] = error_detail
-    fixed_sql = state.get("sql", "")
+        # Step 4: 选择 Skill 文件
+        skill_path = _SKILL_MAP.get(error_type, _DEFAULT_SKILL)
 
-    for attempt in range(_MAX_INNER_RETRIES):
-        prompt = _build_prompt(state, current_skill_md, facts, history)
+        # Step 5: 高置信度列名自动修复（零 LLM 调用）
+        if error_type == "column_not_found" and facts.get("auto_fix_sql"):
+            return _build_return(facts["auto_fix_sql"], "syntax")
 
-        try:
-            fixed_sql = _chain.invoke({"text": prompt})
-            fixed_sql = _clean_md(fixed_sql)
-        except Exception:
-            break
+        # Step 6: ReAct 循环
+        history = ""
+        current_skill_md = _load_skill(skill_path)
+        facts["current_error_type"] = error_type
+        facts["error_detail"] = error_detail
+        fixed_sql = state.get("sql", "")
 
-        test_ok, test_error = _test_execute(fixed_sql)
-        if test_ok:
-            return _build_return(fixed_sql, "syntax")
+        for attempt in range(_MAX_INNER_RETRIES):
+            prompt = _build_prompt(state, current_skill_md, facts, history)
 
-        # 重新诊断
-        new_type, new_detail = _diagnose_from_error(test_error)
-        history += (
-            f"## 第{attempt + 1}轮修复尝试\n"
-            f"修正SQL:\n```\n{fixed_sql}\n```\n"
-            f"新错误: {test_error}\n"
-        )
+            try:
+                fixed_sql = _chain.invoke({"text": prompt})
+                fixed_sql = _clean_md(fixed_sql)
+            except Exception:
+                break
 
-        if new_type == facts["current_error_type"]:
-            facts["error_detail"] = new_detail
-        else:
-            facts["current_error_type"] = new_type
-            facts["error_detail"] = new_detail
-            new_path = _SKILL_MAP.get(new_type, _DEFAULT_SKILL)
-            current_skill_md = _load_skill(new_path)
-            history += f"(错误类型变为 {new_type}，已切换修复策略)\n"
-            facts = {**facts, **_gather_facts(state, new_type, new_detail)}
+            test_ok, test_error = _test_execute(fixed_sql)
+            if test_ok:
+                return _build_return(fixed_sql, "syntax")
 
-    return _build_return(fixed_sql, "syntax")
+            # 重新诊断
+            new_type, new_detail = _diagnose_from_error(test_error)
+            history += (
+                f"## 第{attempt + 1}轮修复尝试\n"
+                f"修正SQL:\n```\n{fixed_sql}\n```\n"
+                f"新错误: {test_error}\n"
+            )
+
+            if new_type == facts["current_error_type"]:
+                facts["error_detail"] = new_detail
+            else:
+                facts["current_error_type"] = new_type
+                facts["error_detail"] = new_detail
+                new_path = _SKILL_MAP.get(new_type, _DEFAULT_SKILL)
+                current_skill_md = _load_skill(new_path)
+                history += f"(错误类型变为 {new_type}，已切换修复策略)\n"
+                facts = {**facts, **_gather_facts(state, new_type, new_detail, adapter)}
+
+        return _build_return(fixed_sql, "syntax")
+
+    return fix_agent
