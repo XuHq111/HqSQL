@@ -163,12 +163,14 @@ def clarify_query(state: dict) -> dict:
                 "query": refined.get("enhanced_query", state.get("raw_query", "")),
                 "clarify_phase": "confirmed",
                 "clarify_analysis": refined,
+                "clarify_user_response": "",   # 清除，防止下一轮污染
             }
         else:
             return {
                 "clarify_phase": "ask_user",
                 "clarify_analysis": refined,
                 "clarify_round": state.get("clarify_round", 1) + 1,
+                "clarify_user_response": "",   # 清除，防止下一轮读到过期值
             }
 
     # ------------------------------------------------------------------

@@ -94,10 +94,12 @@ def _create_clarify_callback(session_id: str):
             "round": payload.get("round", 1),
         })
         # 等待用户通过 POST /api/chat 提交澄清回复
-        event.wait(timeout=300)  # 5分钟超时
+        got_response = event.wait(timeout=300)  # 5分钟超时
         with _lock:
             _pending_clarify.pop(session_id, None)
-        # 从 session state 中读取用户回复
+        if not got_response:
+            return ""   # 超时：返回空字符串，不读 state 中的过期值
+        # 正常收到回复：从 session state 中读取用户输入
         with _lock:
             state = _sessions.get(session_id, {})
         return state.get("clarify_user_response", "")
