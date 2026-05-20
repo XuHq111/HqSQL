@@ -1,14 +1,15 @@
-"""NL2SQL v2 -- LangGraph 入口脚本
+"""NL2SQL v2 -- LangGraph 入口脚本"""
 
-
-"""
 import uuid
 from pymilvus import Collection, connections
 from src.nl2sql_graph.graph_builder import build_graph
 from src.nl2sql_graph.state import OverallState
+from src.nl2sql_graph.services.db_adapter import SQLiteAdapter
+
+DB_PATH = r"E:\sql数据集\accounting.sqlite"
 
 
-def run_query(graph, query: str, skip_clarify: bool = True) -> dict:
+def run_query(graph, query: str, db_adapter, skip_clarify: bool = True) -> dict:
     state: OverallState = {
         "query": query,
         "raw_query": "",
@@ -31,6 +32,8 @@ def run_query(graph, query: str, skip_clarify: bool = True) -> dict:
         "route": "",
         "lookup_context": "",
         "node_timings": {},
+        "_clarify_callback": None,
+        "_adapter": db_adapter,
     }
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
     return graph.invoke(state, config)
@@ -41,7 +44,8 @@ def main():
     collection = Collection("tables")
     collection.load()
 
-    graph = build_graph(collection)
+    db_adapter = SQLiteAdapter(DB_PATH)
+    graph = build_graph(collection, db_adapter)
 
     test_queries = [
         "How are my sales year to date compared to last year?",
@@ -55,7 +59,7 @@ def main():
         print(f"Query: {query}")
         print("-" * 70)
 
-        result = run_query(graph, query)
+        result = run_query(graph, query, db_adapter)
 
         for t in result["all_tables"]:
             print(f"  {t['table_name']:30s} score={t['score']:.4f}")
