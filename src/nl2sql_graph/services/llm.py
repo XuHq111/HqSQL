@@ -6,6 +6,7 @@ qwen3.6-plus: 重量任务（SQL 生成、SQL 修复）
 qwen3.x 系列必须使用 MultiModalConversation API，通过自定义 BaseChatModel 包装
 """
 import dashscope
+import threading
 
 from typing import Any, List, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -20,6 +21,14 @@ if _config_dir not in _sys.path:
 from 环境配置.api_keys import DASHSCOPE_API_KEY
 API_KEY = DASHSCOPE_API_KEY
 dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
+
+# 线程局部：当前节点名（由 graph_builder._timed 设置，供 LLM 日志使用）
+_current_node = threading.local()
+_current_node.name = "unknown"
+
+# 线程局部：当前 session_id（由 graph_builder._timed 从 state 读取后设置）
+_current_session = threading.local()
+_current_session.id = None
 
 
 class _DashScopeChatModel(BaseChatModel):
@@ -43,17 +52,39 @@ class _DashScopeChatModel(BaseChatModel):
             role = 'user' if isinstance(msg, HumanMessage) else 'assistant'
             dashscope_messages.append({'role': role, 'content': [{'text': msg.content}]})
 
+        # 拼接 prompt 文本用于日志
+        prompt_text = "\n".join(
+            f"[{m['role']}]: {m['content'][0]['text'][:2000]}" for m in dashscope_messages
+        )
+
+        t0 = __import__('time').perf_counter()
         resp = dashscope.MultiModalConversation.call(
             model=self.model,
             messages=dashscope_messages,
             api_key=self.api_key,
         )
+        elapsed = round(__import__('time').perf_counter() - t0, 3)
+
         if resp.status_code != 200:
             raise RuntimeError(f"LLM 调用失败: {resp.code} {resp.message}")
         if resp.output is None:
             raise RuntimeError(f"LLM 返回空: code={resp.code}, message={resp.message}")
 
         text = resp.output.choices[0].message.content[0]["text"]
+
+        # 日志记录
+        node = getattr(_current_node, 'name', 'unknown')
+        session_id = getattr(_current_session, 'id', None)
+        if session_id:
+            try:
+                from .logger import _loggers, _lock
+                with _lock:
+                    lggr = _loggers.get(session_id)
+                if lggr:
+                    lggr.log_llm(self.model, node, prompt_text, text, elapsed)
+            except Exception:
+                pass
+
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
 
     @property

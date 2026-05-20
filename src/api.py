@@ -106,6 +106,10 @@ def _create_clarify_callback(session_id: str):
 
 def _run_graph(session_id: str, query: str):
     """在后台线程中运行 LangGraph 流水线，通过 SSE 推送进度"""
+    # 创建会话日志器
+    from src.nl2sql_graph.services.logger import create_logger
+    logger = create_logger(session_id, query)
+
     try:
         state = _make_initial_state(query, session_id)
         with _lock:
@@ -126,6 +130,9 @@ def _run_graph(session_id: str, query: str):
         sql_result = result.get("sql_result", "")
         sql_error = result.get("sql_error")
         timings = result.get("node_timings", {})
+
+        # 完成日志
+        logger.finalize(sql=sql, sql_result=sql_result or "", sql_error=sql_error or "")
 
         if sql_error:
             _emit_event(session_id, "error", {
@@ -149,7 +156,8 @@ def _run_graph(session_id: str, query: str):
             })
 
     except Exception as e:
-        logger.exception("graph execution failed for session %s", session_id)
+        logging.getLogger(__name__).exception("graph execution failed for session %s", session_id)
+        logger.finalize(sql="", sql_result="", sql_error=str(e))
         _emit_event(session_id, "error", {
             "code": "INTERNAL", "detail": str(e)
         })

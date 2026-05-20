@@ -17,11 +17,37 @@ _clarify_callbacks: dict = {}
 
 
 def _timed(name, fn):
-    """包装节点函数，记录耗时到 state["node_timings"]（重试时累加不覆盖）"""
+    """包装节点函数，记录耗时 + 日志到 state["node_timings"]"""
     def wrapper(state):
+        # 设置线程局部变量（供 services/llm.py 日志使用）
+        import threading
+        current_node = threading.local()
+        current_node.name = name
+        session_id = state.get("_clarify_session")
+        try:
+            from .services.llm import _current_node, _current_session
+            _current_node.name = name
+            _current_session.id = session_id
+        except Exception:
+            pass
+
+        # 会话日志记录
+        from .services.logger import get_logger
+        logger = get_logger(state)
+        seq = None
+        if logger:
+            seq = logger.log_node_start(name, state)
+
         t0 = time.perf_counter()
-        result = fn(state)
+        error_msg = None
+        try:
+            result = fn(state)
+        except Exception as e:
+            error_msg = str(e)
+            result = {"error": error_msg}
+
         elapsed = round(time.perf_counter() - t0, 3)
+
         if isinstance(result, dict):
             timings = dict(state.get("node_timings", {}))
             key = name
@@ -31,6 +57,10 @@ def _timed(name, fn):
                 n += 1
             timings[key] = elapsed
             result["node_timings"] = timings
+
+        if logger and seq:
+            logger.log_node_end(seq, result, elapsed, error_msg)
+
         print(f"  [{name}] {elapsed:.2f}s")
         return result
     return wrapper
