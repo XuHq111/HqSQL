@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from pymilvus import Collection, connections
 
-from nl2sql_graph.services.db_adapter import SQLiteAdapter
-from nl2sql_graph.graph_builder import build_graph
+from src.nl2sql_graph.services.db_adapter import SQLiteAdapter
+from src.nl2sql_graph.graph_builder import build_graph
 
 logger = logging.getLogger(__name__)
 
