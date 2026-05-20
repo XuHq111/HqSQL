@@ -76,14 +76,11 @@ class _DashScopeChatModel(BaseChatModel):
         node = getattr(_current_node, 'name', 'unknown')
         session_id = getattr(_current_session, 'id', None)
         if session_id:
-            try:
-                from .logger import _loggers, _lock
-                with _lock:
-                    lggr = _loggers.get(session_id)
-                if lggr:
-                    lggr.log_llm(self.model, node, prompt_text, text, elapsed)
-            except Exception:
-                pass
+            from .logger import _loggers as _llm_loggers, _lock as _llm_lock
+            with _llm_lock:
+                lggr = _llm_loggers.get(session_id)
+            if lggr:
+                lggr.log_llm(self.model, node, prompt_text, text, elapsed)
 
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
 

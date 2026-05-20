@@ -20,16 +20,10 @@ def _timed(name, fn):
     """包装节点函数，记录耗时 + 日志到 state["node_timings"]"""
     def wrapper(state):
         # 设置线程局部变量（供 services/llm.py 日志使用）
-        import threading
-        current_node = threading.local()
-        current_node.name = name
         session_id = state.get("_clarify_session")
-        try:
-            from .services.llm import _current_node, _current_session
-            _current_node.name = name
-            _current_session.id = session_id
-        except Exception:
-            pass
+        from .services.llm import _current_node, _current_session
+        _current_node.name = name
+        _current_session.id = session_id
 
         # 会话日志：记录节点入参（在 fn 调用前快照）
         from .services.logger import get_logger

@@ -44,6 +44,10 @@ _graph = None
 
 
 def _make_initial_state(query: str, session_id: str) -> dict:
+    # 将真正的回调函数注册到 graph_builder 的全局字典中（避免序列化函数对象）
+    from src.nl2sql_graph.graph_builder import _clarify_callbacks
+    _clarify_callbacks[session_id] = _create_clarify_callback(session_id)
+
     return {
         "query": query,
         "raw_query": "",
@@ -68,10 +72,6 @@ def _make_initial_state(query: str, session_id: str) -> dict:
         "node_timings": {},
         "_clarify_session": session_id,
     }
-
-    # 将真正的回调函数注册到 graph_builder 的全局字典中（避免序列化函数对象）
-    from src.nl2sql_graph.graph_builder import _clarify_callbacks
-    _clarify_callbacks[session_id] = _create_clarify_callback(session_id)
 
 
 def _emit_event(session_id: str, event_type: str, data: dict):
