@@ -40,7 +40,7 @@ class SessionLogger:
     # 公共 API
     # ------------------------------------------------------------------
 
-    def log_node_start(self, name: str, state_snapshot: dict):
+    def log_node_start(self, name: str):
         """节点开始前调用。清空 LLM 缓冲区，记录 seq。"""
         self._seq += 1
         self._llm_buffer = []
