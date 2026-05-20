@@ -31,12 +31,13 @@ def _timed(name, fn):
         except Exception:
             pass
 
-        # 会话日志记录
+        # 会话日志：记录节点入参（在 fn 调用前快照）
         from .services.logger import get_logger
         logger = get_logger(state)
+        input_snapshot = dict(state) if logger else None
         seq = None
         if logger:
-            seq = logger.log_node_start(name, state)
+            seq = logger.log_node_start(name)
 
         t0 = time.perf_counter()
         error_msg = None
@@ -59,7 +60,7 @@ def _timed(name, fn):
             result["node_timings"] = timings
 
         if logger and seq:
-            logger.log_node_end(seq, result, elapsed, error_msg)
+            logger.log_node_end(seq, name, input_snapshot, result, elapsed, error_msg)
 
         print(f"  [{name}] {elapsed:.2f}s")
         return result
