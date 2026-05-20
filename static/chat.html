@@ -1,12 +1,238 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HqSQL - NL2SQL</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HqSQL - 智能数据查询</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background:#f3f4f6; height:100vh; display:flex; flex-direction:column; }
+  .header { background:#4f46e5; color:#fff; padding:12px 20px; font-size:18px; font-weight:600; }
+  #chat-area { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:85%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.6; }
+  .msg.user { align-self:flex-end; background:#4f46e5; color:#fff; border-radius:12px 12px 0 12px; }
+  .msg.system { align-self:flex-start; background:#fff; border:1px solid #e5e7eb; border-radius:12px 12px 12px 0; }
+  .msg.progress { align-self:flex-start; background:#f0f0ff; border-left:3px solid #818cf8; border-radius:4px; padding:8px 12px; font-size:13px; color:#4f46e5; }
+  .msg.clarify { align-self:flex-start; background:#fff; border:1px solid #fbbf24; border-radius:12px 12px 12px 0; max-width:85%; }
+  .msg.error { align-self:flex-start; background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; }
+  .sql-block { background:#1e1e1e; color:#d4d4d4; padding:10px 12px; border-radius:6px; font-family:monospace; font-size:12px; overflow-x:auto; margin-top:8px; white-space:pre-wrap; }
+  .result-section { margin-top:12px; }
+  .result-header { font-weight:600; font-size:13px; color:#6b7280; margin-bottom:6px; }
+  .input-area { padding:12px 20px; background:#fff; border-top:1px solid #e5e7eb; display:flex; gap:10px; align-items:center; }
+  .input-area input { flex:1; padding:10px 14px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; outline:none; }
+  .input-area input:focus { border-color:#4f46e5; }
+  .input-area button { background:#4f46e5; color:#fff; border:none; padding:10px 24px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .input-area button:hover { background:#4338ca; }
+  .input-area button:disabled { background:#9ca3af; cursor:not-allowed; }
+  .tabulator { font-size:13px; }
+  .clarify-form { margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+  .clarify-form input { padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; }
+  .clarify-form button { align-self:flex-end; background:#f59e0b; color:#fff; border:none; padding:6px 16px; border-radius:6px; cursor:pointer; }
+  .tip { font-size:11px; color:#9ca3af; margin-left:8px; }
+</style>
 </head>
 <body>
-    <h1>HqSQL - NL2SQL 查询界面</h1>
-    <p>前端页面开发中...</p>
+<div class="header">HqSQL · 智能数据查询</div>
+<div id="chat-area"></div>
+<div class="input-area" id="input-area">
+  <input type="text" id="query-input" placeholder="输入您的查询，例如：本月各部门的费用对比" autofocus>
+  <button id="send-btn" onclick="sendMessage()">发送</button>
+  <span class="tip">Enter 发送</span>
+</div>
+<input type="hidden" id="session-id" value="">
+<input type="hidden" id="pending-clarify" value="">
+
+<script>
+let currentSessionId = "";
+let eventSource = null;
+
+function appendChat(html) {
+  document.getElementById("chat-area").insertAdjacentHTML("beforeend", html);
+  document.getElementById("chat-area").scrollTop = document.getElementById("chat-area").scrollHeight;
+}
+
+function appendUserMsg(text) {
+  appendChat(`<div class="msg user">${escapeHtml(text)}</div>`);
+}
+
+function appendProgress(detail) {
+  appendChat(`<div class="msg progress">${detail}</div>`);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function connectSSE(sessionId) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/chat/stream?session_id=${sessionId}`);
+
+  eventSource.addEventListener("progress", (e) => {
+    const data = JSON.parse(e.data);
+    const icon = "📋";
+    appendProgress(`${icon} ${data.detail}`);
+  });
+
+  eventSource.addEventListener("clarify", (e) => {
+    const data = JSON.parse(e.data);
+    document.getElementById("pending-clarify").value = "1";
+    const questionsHtml = data.questions.map((q, i) =>
+      `<div>${i+1}. ${escapeHtml(q)}</div>`
+    ).join("");
+    appendChat(`
+      <div class="msg clarify">
+        <div style="font-weight:600;font-size:12px;color:#92400e;margin-bottom:6px;">🤔 帮您确认几个信息：</div>
+        <div style="font-size:13px;margin-bottom:8px;">${questionsHtml}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">当前理解：${escapeHtml(data.enhanced_query)}</div>
+        <div class="clarify-form">
+          <input type="text" id="clarify-input" placeholder="在此输入补充说明，或留空回车确认">
+          <button onclick="submitClarify()">确认</button>
+        </div>
+      </div>
+    `);
+    document.getElementById("clarify-input")?.focus();
+  });
+
+  eventSource.addEventListener("result", (e) => {
+    const data = JSON.parse(e.data);
+    let html = '<div class="msg system">';
+
+    if (data.sql) {
+      html += `<div style="font-weight:600;font-size:12px;color:#6b7280;margin-bottom:4px;">生成的 SQL</div>`;
+      html += `<div class="sql-block">${escapeHtml(data.sql)}</div>`;
+    }
+
+    if (data.columns && data.columns.length > 0) {
+      const tableId = "result-table-" + Date.now();
+      html += `<div class="result-section">`;
+      html += `<div class="result-header">查询结果 <span style="color:#10b981;font-weight:normal">（${data.row_count} 行，${data.total_time}s）</span></div>`;
+      html += `<div id="${tableId}" class="tabulator"></div>`;
+      html += `</div>`;
+      appendChat(html);
+
+      const tableData = data.rows.map(row => {
+        const obj = {};
+        data.columns.forEach((col, i) => { obj[col] = row[i] || ""; });
+        return obj;
+      });
+      new Tabulator(`#${tableId}`, {
+        data: tableData,
+        layout: "fitColumns",
+        pagination: "local",
+        paginationSize: 15,
+        columns: data.columns.map(col => ({ title: col, field: col, headerFilter: true })),
+      });
+    } else {
+      if (data.row_count === 0) {
+        html += `<div style="margin-top:8px;color:#9ca3af;">查询结果为空</div>`;
+      }
+      appendChat(html);
+    }
+
+    document.getElementById("send-btn").disabled = false;
+    document.getElementById("query-input").disabled = false;
+    document.getElementById("pending-clarify").value = "";
+    eventSource.close();
+  });
+
+  eventSource.addEventListener("error", (e) => {
+    let detail = "未知错误";
+    let sql = "";
+    try {
+      const data = JSON.parse(e.data);
+      detail = data.detail || detail;
+      sql = data.sql || "";
+    } catch(ex) {}
+
+    let html = `<div class="msg error">`;
+    html += `<div style="font-weight:600;">⚠ 执行出错</div>`;
+    html += `<div style="margin-top:4px;">${escapeHtml(detail)}</div>`;
+    if (sql) {
+      html += `<div style="font-weight:600;font-size:12px;color:#6b7280;margin:8px 0 4px;">最后生成的 SQL</div>`;
+      html += `<div class="sql-block">${escapeHtml(sql)}</div>`;
+    }
+    html += `</div>`;
+    appendChat(html);
+    document.getElementById("send-btn").disabled = false;
+    document.getElementById("query-input").disabled = false;
+    document.getElementById("pending-clarify").value = "";
+    eventSource.close();
+  });
+
+  eventSource.onerror = () => {
+    console.log("SSE connection closed");
+  };
+}
+
+async function sendMessage(messageText) {
+  const input = document.getElementById("query-input");
+  const text = messageText || input.value.trim();
+  if (!text) return;
+
+  const resp = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      session_id: currentSessionId,
+      message: text,
+      clarify_response: "",
+    }),
+  });
+  const result = await resp.json();
+  currentSessionId = result.session_id;
+  document.getElementById("session-id").value = currentSessionId;
+
+  appendUserMsg(text);
+  input.value = "";
+  document.getElementById("send-btn").disabled = true;
+  input.disabled = true;
+
+  connectSSE(currentSessionId);
+}
+
+async function submitClarify() {
+  const input = document.getElementById("clarify-input");
+  const reply = input ? input.value.trim() : "";
+
+  await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      session_id: currentSessionId,
+      message: "",
+      clarify_response: reply,
+    }),
+  });
+
+  const clarifyCard = document.querySelector(".msg.clarify");
+  if (clarifyCard) {
+    clarifyCard.innerHTML = `<div style="font-size:13px;color:#166534;">✅ 已提交${reply ? '：' + escapeHtml(reply) : '确认'}</div>`;
+    clarifyCard.style.border = "1px solid #86efac";
+    clarifyCard.style.background = "#f0fdf4";
+  }
+  document.getElementById("pending-clarify").value = "";
+}
+
+// 回车发送
+document.getElementById("query-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// 回车提交澄清
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && document.getElementById("pending-clarify").value === "1") {
+    e.preventDefault();
+    submitClarify();
+  }
+});
+</script>
 </body>
 </html>
