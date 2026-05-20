@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HqSQL - 智能数据查询</title>
-<script src="https://unpkg.com/htmx.org@2.0.4"></script>
 <link href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator.min.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
 <style>
@@ -73,13 +72,29 @@ function connectSSE(sessionId) {
   eventSource = new EventSource(`/api/chat/stream?session_id=${sessionId}`);
 
   eventSource.addEventListener("progress", (e) => {
-    const data = JSON.parse(e.data);
+    let data;
+    try {
+      data = JSON.parse(e.data);
+    } catch(ex) {
+      console.error("Failed to parse progress event data:", ex);
+      document.getElementById("send-btn").disabled = false;
+      document.getElementById("query-input").disabled = false;
+      return;
+    }
     const icon = "📋";
     appendProgress(`${icon} ${data.detail}`);
   });
 
   eventSource.addEventListener("clarify", (e) => {
-    const data = JSON.parse(e.data);
+    let data;
+    try {
+      data = JSON.parse(e.data);
+    } catch(ex) {
+      console.error("Failed to parse clarify event data:", ex);
+      document.getElementById("send-btn").disabled = false;
+      document.getElementById("query-input").disabled = false;
+      return;
+    }
     document.getElementById("pending-clarify").value = "1";
     const questionsHtml = data.questions.map((q, i) =>
       `<div>${i+1}. ${escapeHtml(q)}</div>`
@@ -99,7 +114,16 @@ function connectSSE(sessionId) {
   });
 
   eventSource.addEventListener("result", (e) => {
-    const data = JSON.parse(e.data);
+    let data;
+    try {
+      data = JSON.parse(e.data);
+    } catch(ex) {
+      console.error("Failed to parse result event data:", ex);
+      document.getElementById("send-btn").disabled = false;
+      document.getElementById("query-input").disabled = false;
+      eventSource.close();
+      return;
+    }
     let html = '<div class="msg system">';
 
     if (data.sql) {
