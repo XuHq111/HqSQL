@@ -111,8 +111,13 @@ def clarify_query(state: dict) -> dict:
                 "clarify_phase": "confirmed",
             }
 
-        # 回调模式：通过 _clarify_callback 获取用户响应
-        callback = state.get("_clarify_callback")
+        # 回调模式：通过 _clarify_session 从全局注册表查找回调
+        session_id = state.get("_clarify_session")
+        callback = None
+        if session_id:
+            from ..graph_builder import _clarify_callbacks
+            callback = _clarify_callbacks.get(session_id)
+
         if callback is None:
             # 无回调 → 直接确认（兼容 CLI 模式 / skip 模式）
             return {

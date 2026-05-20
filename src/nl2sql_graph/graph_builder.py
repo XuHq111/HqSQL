@@ -11,6 +11,10 @@ from .nodes.fix_agent import make_fix_agent
 from .nodes.lookup_values import make_lookup_values
 from .nodes import semantic_validate as semantic_node
 
+# 全局回调注册表：session_id → clarify 回调函数
+# 由 api.py 在 graph.invoke() 前注册，clarify 节点通过 state["_clarify_session"] 查找
+_clarify_callbacks: dict = {}
+
 
 def _timed(name, fn):
     """包装节点函数，记录耗时到 state["node_timings"]（重试时累加不覆盖）"""
