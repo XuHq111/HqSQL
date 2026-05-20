@@ -4,6 +4,8 @@ import json
 import uuid
 import time
 import threading
+import logging
+import re
 from contextlib import asynccontextmanager
 from queue import Queue
 
@@ -16,6 +18,8 @@ from pymilvus import Collection, connections
 from nl2sql_graph.services.db_adapter import SQLiteAdapter
 from nl2sql_graph.graph_builder import build_graph
 
+logger = logging.getLogger(__name__)
+
 DB_PATH = r"E:\sql数据集\accounting.sqlite"
 STATIC_DIR = "static"
 
@@ -27,6 +31,9 @@ _sessions: dict[str, dict] = {}
 _session_last_active: dict[str, float] = {}
 # 等待 clarify 响应的会话
 _pending_clarify: dict[str, threading.Event] = {}
+
+_lock = threading.Lock()
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 SESSION_TTL = 86400  # 24小时
 
@@ -66,7 +73,8 @@ def _make_initial_state(query: str, session_id: str) -> dict:
 
 def _emit_event(session_id: str, event_type: str, data: dict):
     """向指定 session 的 SSE 队列推送事件"""
-    q = _event_queues.get(session_id)
+    with _lock:
+        q = _event_queues.get(session_id)
     if q:
         q.put({"event": event_type, "data": json.dumps(data, ensure_ascii=False)})
 
@@ -75,7 +83,8 @@ def _create_clarify_callback(session_id: str):
     """创建 clarify 回调函数：将澄清问题推送给前端 SSE，等待用户回复"""
     def on_clarify(payload: dict) -> str:
         event = threading.Event()
-        _pending_clarify[session_id] = event
+        with _lock:
+            _pending_clarify[session_id] = event
         _emit_event(session_id, "clarify", {
             "enhanced_query": payload.get("enhanced_query", ""),
             "questions": payload.get("questions", []),
@@ -83,9 +92,11 @@ def _create_clarify_callback(session_id: str):
         })
         # 等待用户通过 POST /api/chat 提交澄清回复
         event.wait(timeout=300)  # 5分钟超时
-        _pending_clarify.pop(session_id, None)
+        with _lock:
+            _pending_clarify.pop(session_id, None)
         # 从 session state 中读取用户回复
-        state = _sessions.get(session_id, {})
+        with _lock:
+            state = _sessions.get(session_id, {})
         return state.get("clarify_user_response", "")
     return on_clarify
 
@@ -94,8 +105,9 @@ def _run_graph(session_id: str, query: str):
     """在后台线程中运行 LangGraph 流水线，通过 SSE 推送进度"""
     try:
         state = _make_initial_state(query, session_id)
-        _sessions[session_id] = state
-        _session_last_active[session_id] = time.time()
+        with _lock:
+            _sessions[session_id] = state
+            _session_last_active[session_id] = time.time()
 
         config = {"configurable": {"thread_id": session_id}}
 
@@ -104,7 +116,8 @@ def _run_graph(session_id: str, query: str):
         })
 
         result = _graph.invoke(state, config)
-        _sessions[session_id] = result
+        with _lock:
+            _sessions[session_id] = result
 
         sql = result.get("sql", "")
         sql_result = result.get("sql_result", "")
@@ -133,6 +146,7 @@ def _run_graph(session_id: str, query: str):
             })
 
     except Exception as e:
+        logger.exception("graph execution failed for session %s", session_id)
         _emit_event(session_id, "error", {
             "code": "INTERNAL", "detail": str(e)
         })
@@ -141,15 +155,16 @@ def _run_graph(session_id: str, query: str):
 def _cleanup_expired_sessions():
     """清理过期会话"""
     now = time.time()
-    expired = [
-        sid for sid, ts in _session_last_active.items()
-        if now - ts > SESSION_TTL
-    ]
-    for sid in expired:
-        _sessions.pop(sid, None)
-        _session_last_active.pop(sid, None)
-        _event_queues.pop(sid, None)
-        _pending_clarify.pop(sid, None)
+    with _lock:
+        expired = [
+            sid for sid, ts in _session_last_active.items()
+            if now - ts > SESSION_TTL
+        ]
+        for sid in expired:
+            _sessions.pop(sid, None)
+            _session_last_active.pop(sid, None)
+            _event_queues.pop(sid, None)
+            _pending_clarify.pop(sid, None)
 
 
 @asynccontextmanager
@@ -189,13 +204,15 @@ async def chat(
     if not session_id:
         session_id = str(uuid.uuid4())
 
-    _session_last_active[session_id] = time.time()
+    with _lock:
+        _session_last_active[session_id] = time.time()
 
     # 如果是澄清回复
     if clarify_response:
-        state = _sessions.get(session_id, {})
-        state["clarify_user_response"] = clarify_response
-        event = _pending_clarify.get(session_id)
+        with _lock:
+            state = _sessions.get(session_id, {})
+            state["clarify_user_response"] = clarify_response
+            event = _pending_clarify.get(session_id)
         if event:
             event.set()
         return JSONResponse({"session_id": session_id, "status": "clarify_response_received"})
@@ -204,8 +221,7 @@ async def chat(
     if not message.strip():
         return JSONResponse({"error": "message 不能为空"}, status_code=400)
 
-    if session_id not in _event_queues:
-        _event_queues[session_id] = Queue()
+    q = _event_queues.setdefault(session_id, Queue())
 
     thread = threading.Thread(target=_run_graph, args=(session_id, message), daemon=True)
     thread.start()
@@ -216,6 +232,9 @@ async def chat(
 @app.get("/api/chat/stream")
 async def chat_stream(session_id: str, request: Request):
     """SSE 端点：前端 EventSource 订阅"""
+    if not _UUID_RE.match(session_id):
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+
     if session_id not in _event_queues:
         _event_queues[session_id] = Queue()
 
