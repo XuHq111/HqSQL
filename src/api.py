@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
     _collection = Collection("tables")
     _collection.load()
     _db_adapter = SQLiteAdapter(DB_PATH)
-    _graph = build_graph(_collection, _db_adapter, on_clarify_ask=None)
+    _graph = build_graph(_collection, _db_adapter)
     yield
     connections.disconnect("default")
 
@@ -184,6 +184,8 @@ async def chat(
     message: str = Form(default=""),
     clarify_response: str = Form(default=""),
 ):
+    _cleanup_expired_sessions()
+
     if not session_id:
         session_id = str(uuid.uuid4())
 
