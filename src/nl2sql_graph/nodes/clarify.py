@@ -30,7 +30,9 @@ _ANALYZE_TEMPLATE = """{domain_context}
 3. 提出最多2个关键澄清问题
 
 输出格式（严格JSON，不要markdown代码块）：
-{{"enhanced_query": "...", "questions": ["...", "..."], "domain_notes": "...", "confidence": "high|medium|low"}}"""
+{{"enhanced_query": "...", "questions": ["...", "..."], "domain_notes": "...", "confidence": "high|medium|low"}}
+
+注意：enhanced_query 必须是增强后的自然语言查询，严禁生成 SQL 语句！"""
 
 _REFINE_TEMPLATE = """{domain_context}
 

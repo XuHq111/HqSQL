@@ -17,7 +17,9 @@ _FORBIDDEN_RE = re.compile(
 
 def _is_select_only(sql: str) -> bool:
     stripped = sql.strip()
-    if not stripped.upper().startswith("SELECT"):
+    upper = stripped.upper()
+    # 允许 SELECT 或 WITH（CTE 公共表表达式）开头的查询
+    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
         return False
     return _FORBIDDEN_RE.search(stripped) is None
 
