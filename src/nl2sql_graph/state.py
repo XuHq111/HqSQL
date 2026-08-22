@@ -53,6 +53,11 @@ class OverallState(TypedDict):
     fix_source: str                         # fix_agent 触发来源："syntax" | "semantic_gap"
     semantic_retry_count: int               # 语义修复尝试次数（上限1次，防死循环）
 
+    # === 指标语义层（Stage 0.5：semantic_map → metric_expand） ===
+    metric_plan: Optional[Dict]              # semantic_map 输出 {metric, dims, granule, extra_filters, confidence}
+    metric_hit: bool                         # 是否命中注册表指标（命中才走口径约束）
+    metric_context: str                      # 展开后的口径硬约束文本（注入 build_prompt）
+
     # === 值发现（lookup_values节点） ===
     lookup_context: str                      # 运行时从数据库探查到的枚举值/实际值文本
 

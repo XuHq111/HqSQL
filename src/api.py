@@ -20,7 +20,16 @@ from src.nl2sql_graph.graph_builder import build_graph
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = r"E:\sql数据集\accounting.sqlite"
+import os
+
+# 数据库路径优先级：项目本地副本（sql数据集 / sql_examles 目录均可）> Windows E: 盘 > WSL /mnt/e 挂载
+_candidates = [
+    os.path.join(os.path.dirname(__file__), '..', '..', 'sql数据集', 'accounting.sqlite'),
+    os.path.join(os.path.dirname(__file__), '..', '..', 'sql_examles', 'accounting.sqlite'),
+    r"E:\sql数据集\accounting.sqlite",
+    "/mnt/e/sql数据集/accounting.sqlite",
+]
+DB_PATH = next((p for p in _candidates if os.path.exists(p)), _candidates[0])
 STATIC_DIR = "static"
 
 # SSE 事件缓冲区（session_id → Queue）
@@ -36,6 +45,26 @@ _lock = threading.Lock()
 _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 
 SESSION_TTL = 86400  # 24小时
+
+# 节点级进度文案（on_progress → SSE progress 事件）
+_PROGRESS_DETAILS = {
+    "clarify_query": "正在理解您的查询并分析需求...",
+    "semantic_map": "正在识别业务指标与维度...",
+    "metric_expand": "正在按指标口径展开...",
+    "recall_tables": "正在检索相关表结构...",
+    "rerank_tables": "正在筛选最相关的数据表...",
+    "lookup_values": "正在探查数据库中的取值...",
+    "generate_sql": "正在生成 SQL...",
+    "semantic_validate": "正在校验 SQL 语义...",
+    "execute_sql": "正在数据库执行查询...",
+    "fix_agent": "发现异常，正在自动修复...",
+}
+
+
+def _on_progress(node_name: str, session_id):
+    detail = _PROGRESS_DETAILS.get(node_name)
+    if detail and session_id:
+        _emit_event(session_id, "progress", {"step": node_name, "detail": detail})
 
 # 全局单例
 _collection = None
@@ -112,6 +141,13 @@ def _run_graph(session_id: str, query: str):
     from src.nl2sql_graph.services.logger import create_logger
     logger = create_logger(session_id, query)
 
+    # 注册思维链推送回调：LLM reasoning_content 增量 → SSE thinking 事件
+    from src.nl2sql_graph.services import llm as llm_service
+
+    def _on_thinking(node_name: str, delta: str):
+        _emit_event(session_id, "thinking", {"node": node_name, "delta": delta})
+
+    llm_service._thinking_callbacks[session_id] = _on_thinking
     try:
         state = _make_initial_state(query, session_id)
         with _lock:
@@ -127,6 +163,13 @@ def _run_graph(session_id: str, query: str):
         result = _graph.invoke(state, config)
         with _lock:
             _sessions[session_id] = result
+
+        # 上游 guard 触发的明确失败（如召回为空）直接报错给前端
+        if result.get("error"):
+            detail = result["error"]
+            logger.finalize(sql="", sql_result="", sql_error=detail)
+            _emit_event(session_id, "error", {"code": "RECALL_FAILED", "detail": detail})
+            return
 
         sql = result.get("sql", "")
         sql_result = result.get("sql_result", "")
@@ -163,6 +206,8 @@ def _run_graph(session_id: str, query: str):
         _emit_event(session_id, "error", {
             "code": "INTERNAL", "detail": str(e)
         })
+    finally:
+        llm_service._thinking_callbacks.pop(session_id, None)
 
 
 def _cleanup_expired_sessions():
@@ -178,6 +223,7 @@ def _cleanup_expired_sessions():
             _session_last_active.pop(sid, None)
             _event_queues.pop(sid, None)
             _pending_clarify.pop(sid, None)
+            _sse_generations.pop(sid, None)
 
 
 @asynccontextmanager
@@ -187,7 +233,15 @@ async def lifespan(app: FastAPI):
     _collection = Collection("tables")
     _collection.load()
     _db_adapter = SQLiteAdapter(DB_PATH)
-    _graph = build_graph(_collection, _db_adapter)
+    _graph = build_graph(_collection, _db_adapter, on_progress=_on_progress)
+
+    # 指标注册表加载 + 静态校验（表/列存在性），问题打日志但不阻断启动
+    from src.nl2sql_graph.services import metrics as metric_service
+    metric_service.init_registry(_db_adapter)
+    problems = metric_service.get_registry().problems
+    if problems:
+        logger.warning("指标注册表校验发现问题（%d 条）：%s", len(problems), problems)
+
     yield
     connections.disconnect("default")
 
@@ -242,6 +296,30 @@ async def chat(
     return JSONResponse({"session_id": session_id, "status": "processing"})
 
 
+@app.get("/api/metrics")
+async def list_metrics():
+    """查看指标注册表与校验状态"""
+    from src.nl2sql_graph.services import metrics as metric_service
+    return metric_service.get_registry().summary()
+
+
+@app.post("/api/metrics/reload")
+async def reload_metrics():
+    """热加载指标注册表（改口径后无需重启服务）"""
+    from src.nl2sql_graph.services import metrics as metric_service
+    registry = metric_service.reload_registry(_db_adapter)
+    return {
+        "ok": not registry.problems,
+        "loaded_metrics": len(registry.metrics),
+        "problems": registry.problems,
+    }
+
+
+# SSE 连接代际：session_id → 当前活跃连接编号。
+# EventSource 断线自动重连时，用新连接顶掉旧连接，防止旧连接继续消费队列导致事件被吞
+_sse_generations: dict[str, int] = {}
+
+
 @app.get("/api/chat/stream")
 async def chat_stream(session_id: str, request: Request):
     """SSE 端点：前端 EventSource 订阅"""
@@ -252,15 +330,22 @@ async def chat_stream(session_id: str, request: Request):
         _event_queues[session_id] = Queue()
 
     q = _event_queues[session_id]
+    with _lock:
+        generation = _sse_generations.get(session_id, 0) + 1
+        _sse_generations[session_id] = generation
 
     async def generate():
         while True:
-            if await request.is_disconnected():
-                break
+            with _lock:
+                if _sse_generations.get(session_id) != generation:
+                    break  # 已有更新的连接，本连接作废
             try:
                 item = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: q.get(timeout=30)
                 )
+                with _lock:
+                    if _sse_generations.get(session_id) != generation:
+                        break
                 yield f"event: {item['event']}\ndata: {item['data']}\n\n"
                 if item["event"] in ("result", "error"):
                     break

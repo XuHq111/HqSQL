@@ -4,6 +4,8 @@ import os
 from pymilvus import Collection, connections
 from src.nl2sql_graph.graph_builder import build_graph
 from src.nl2sql_graph.state import OverallState
+from src.nl2sql_graph.services.db_adapter import SQLiteAdapter
+from src.api import DB_PATH
 
 # 加载测试数据
 proj_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,8 +19,9 @@ test_queries = all_queries[:10]
 connections.connect(host='localhost', port='19530', db_name='HqSQL')
 collection = Collection("tables")
 collection.load()
-graph = build_graph(collection)
+graph = build_graph(collection, SQLiteAdapter(DB_PATH))
 
+for item in test_queries:
     qid = item['id']
     query = item['Query']
     level = item['Level']

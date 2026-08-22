@@ -17,6 +17,13 @@ def build_prompt(state: dict) -> dict:
         lines.append(lookup)
         lines.append("")
 
+    # 指标语义层：命中指标时注入已核定口径（硬约束）
+    metric_ctx = state.get("metric_context", "")
+    if metric_ctx:
+        lines.append("## 已核定指标口径（硬约束，不得修改或删除）\n")
+        lines.append(metric_ctx)
+        lines.append("")
+
     lines.append(f"## 相关表（共{len(selected_tables)}张）\n")
 
     for i, t in enumerate(selected_tables):
@@ -42,6 +49,7 @@ def build_prompt(state: dict) -> dict:
 
 **第二步：SQL 生成**
 对照需求清单逐条实现，确保每一条需求在 SQL 中都有对应的子句。
+若存在「## 已核定指标口径（硬约束，不得修改或删除）」一节：SELECT 的聚合列与聚合函数、JOIN 关系、口径过滤条件必须与口径完全一致，只允许在其基础上补充时间范围、排序、限量等额外条件。
 
 输出格式（严格遵守，不要用 markdown 代码块包裹 JSON）：
 {

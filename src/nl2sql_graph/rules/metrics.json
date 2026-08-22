@@ -1,0 +1,101 @@
+{
+  "_说明": [
+    "指标语义层注册表：把业务口径从 prompt 沉淀为结构化配置。",
+    "字段说明：",
+    "  name        指标名（semantic_map 节点按此名匹配，勿随意改名，改后需同步改 aliases）",
+    "  aliases     别名（含英文），NL 识别时大小写不敏感",
+    "  description 一句话口径，会注入 LLM 上下文与生成 prompt",
+    "  enabled     停用后查询自动回退通用生成流程，不阻塞",
+    "  measure     {table 事实表, alias 主表别名, column 金额列, agg 聚合函数}",
+    "  joins       口径所需的 JOIN（如科目大类在 chart_of_accounts 需按 businessID+Account=Account_name 连接）",
+    "  filters     口径过滤条件；value 以 func: 开头时按原样渲染为 SQL 表达式（如 func:date('now')）",
+    "  dims        维度白名单；含 date_granules 的维度支持按 日/月/年 聚合，strftime 表达式",
+    "",
+    "建档口径（已核实的库事实）：",
+    "- 金额口径：收入=Credit 贷方合计，费用=Debit 借方合计（Amount 禁止用作口径列）",
+    "- 科目大类：master_txn_table.Account 是具体科目名，大类在 chart_of_accounts.Account_type，必须 JOIN",
+    "- 应收账款：仅 accounts receivable (a/r) 科目（实测：该科目 16.7 万行全部 Transaction_TYPE='invoice' 且 AR_paid='paid'，AR_paid 在应收科目上无 '--' 值，故口径不含 AR_paid；余额用 Open_balance 未清余额合计，总计约 26.9 亿）",
+    "- 逾期金额：按到期日 Due_DATE 判定（用户澄清确认），数据集止于 2023 年，故当前日期下逾期=全部未收，属口径语义而非 bug",
+    "",
+    "新增指标：复制一个条目改字段即可；改完用 POST /api/metrics/reload 热加载，或重启后端。"
+  ],
+  "metrics": [
+    {
+      "name": "收入",
+      "aliases": ["营业收入", "销售收入", "销售额", "销售总额", "主营收入", "revenue", "sales", "income", "gross income"],
+      "description": "主营业务收入：invoice 交易中收入类科目（chart_of_accounts.Account_type='income'）的贷方 Credit 合计",
+      "enabled": true,
+      "measure": {"table": "master_txn_table", "alias": "t", "column": "Credit", "agg": "SUM"},
+      "joins": [
+        {"table": "chart_of_accounts", "alias": "a", "on": [["t.businessID", "a.businessID"], ["t.Account", "a.Account_name"]]}
+      ],
+      "filters": [
+        {"expr": "a.Account_type", "op": "=", "value": "income"},
+        {"expr": "t.Transaction_TYPE", "op": "=", "value": "invoice"}
+      ],
+      "dims": [
+        {"name": "日期", "column": "t.Transaction_DATE", "date_granules": {"日": "strftime('%Y-%m-%d', t.Transaction_DATE)", "月": "strftime('%Y-%m', t.Transaction_DATE)", "年": "strftime('%Y', t.Transaction_DATE)"}},
+        {"name": "客户", "column": "t.Customers"},
+        {"name": "产品/服务", "column": "t.Product_Service"},
+        {"name": "支付方式", "column": "t.payment_method"}
+      ]
+    },
+    {
+      "name": "费用",
+      "aliases": ["支出", "营业费用", "开销", "成本支出", "expense", "expenses", "spending", "cost"],
+      "description": "营业费用：bill 交易中费用类科目（chart_of_accounts.Account_type='expenses'）的借方 Debit 合计",
+      "enabled": true,
+      "measure": {"table": "master_txn_table", "alias": "t", "column": "Debit", "agg": "SUM"},
+      "joins": [
+        {"table": "chart_of_accounts", "alias": "a", "on": [["t.businessID", "a.businessID"], ["t.Account", "a.Account_name"]]}
+      ],
+      "filters": [
+        {"expr": "a.Account_type", "op": "=", "value": "expenses"},
+        {"expr": "t.Transaction_TYPE", "op": "=", "value": "bill"}
+      ],
+      "dims": [
+        {"name": "日期", "column": "t.Transaction_DATE", "date_granules": {"日": "strftime('%Y-%m-%d', t.Transaction_DATE)", "月": "strftime('%Y-%m', t.Transaction_DATE)", "年": "strftime('%Y', t.Transaction_DATE)"}},
+        {"name": "供应商", "column": "t.Vendor"},
+        {"name": "产品/服务", "column": "t.Product_Service"},
+        {"name": "支付方式", "column": "t.payment_method"}
+      ]
+    },
+    {
+      "name": "应收账款",
+      "aliases": ["应收", "应收款", "应收余额", "未清余额", "accounts receivable", "ar", "a/r", "receivables"],
+      "description": "应收账款余额：accounts receivable (a/r) 科目下 invoice 交易的未清余额 Open_balance 合计（该科目全部记录 AR_paid='paid'，口径不含收款状态）",
+      "enabled": true,
+      "measure": {"table": "master_txn_table", "alias": "t", "column": "Open_balance", "agg": "SUM"},
+      "joins": [
+        {"table": "chart_of_accounts", "alias": "a", "on": [["t.businessID", "a.businessID"], ["t.Account", "a.Account_name"]]}
+      ],
+      "filters": [
+        {"expr": "a.Account_type", "op": "=", "value": "accounts receivable (a/r)"},
+        {"expr": "t.Transaction_TYPE", "op": "=", "value": "invoice"}
+      ],
+      "dims": [
+        {"name": "日期", "column": "t.Transaction_DATE", "date_granules": {"日": "strftime('%Y-%m-%d', t.Transaction_DATE)", "月": "strftime('%Y-%m', t.Transaction_DATE)", "年": "strftime('%Y', t.Transaction_DATE)"}},
+        {"name": "客户", "column": "t.Customers"}
+      ]
+    },
+    {
+      "name": "逾期金额",
+      "aliases": ["逾期", "逾期账款", "超期未收", "overdue", "past due"],
+      "description": "逾期金额：应收账款口径（a/r 科目 invoice 交易）中到期日 Due_DATE 早于当前日期的未清余额合计",
+      "enabled": true,
+      "measure": {"table": "master_txn_table", "alias": "t", "column": "Open_balance", "agg": "SUM"},
+      "joins": [
+        {"table": "chart_of_accounts", "alias": "a", "on": [["t.businessID", "a.businessID"], ["t.Account", "a.Account_name"]]}
+      ],
+      "filters": [
+        {"expr": "a.Account_type", "op": "=", "value": "accounts receivable (a/r)"},
+        {"expr": "t.Transaction_TYPE", "op": "=", "value": "invoice"},
+        {"expr": "t.Due_DATE", "op": "<", "value": "func:date('now')"}
+      ],
+      "dims": [
+        {"name": "日期", "column": "t.Transaction_DATE", "date_granules": {"日": "strftime('%Y-%m-%d', t.Transaction_DATE)", "月": "strftime('%Y-%m', t.Transaction_DATE)", "年": "strftime('%Y', t.Transaction_DATE)"}},
+        {"name": "客户", "column": "t.Customers"}
+      ]
+    }
+  ]
+}

@@ -25,9 +25,20 @@ def generate_sql(state: dict) -> dict:
             cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
             cleaned = re.sub(r"\s*```$", "", cleaned)
         parsed = json.loads(cleaned)
+        # 指标语义层的口径条目（id 1001+，由 metric_expand 预置）必须保留，
+        # 与 LLM 本次拆解的需求按 desc 去重合并，不能整体覆盖
+        seeded = state.get("requirement_items", []) or []
+        llm_items = parsed.get("requirements", []) or []
+        merged = []
+        seen = set()
+        for item in seeded + llm_items:
+            key = str(item.get("desc", "")).strip()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(item)
         return {
             "sql": parsed["sql"],
-            "requirement_items": parsed.get("requirements", []),
+            "requirement_items": merged,
         }
     except (json.JSONDecodeError, KeyError, TypeError):
         return {
