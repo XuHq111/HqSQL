@@ -179,11 +179,11 @@ def _build_prompt(state: dict, skill_md: str, facts: dict, history: str = "") ->
     将 skill.md 中的占位符填充为实际值，如有历史记录则前置。
     """
     format_vars = {
-        "query": state.get("query", ""),
-        "sql": state.get("sql", ""),
-        "error": state.get("sql_error", ""),
+        "query": state.get("query") or "",
+        "sql": state.get("sql") or "",
+        "error": state.get("sql_error") or "",
         "schema_context": _build_schema_context(state),
-        "lookup_context": state.get("lookup_context", ""),
+        "lookup_context": state.get("lookup_context") or "",
         "actual_columns": facts.get("actual_columns", ""),
         "wrong_col": facts.get("wrong_col", ""),
         "suggested_col": facts.get("suggested_col", ""),
@@ -231,6 +231,77 @@ def _build_return(fixed_sql: str, fix_source: str = "syntax") -> dict:
 
 
 # ============================================================
+# 修复结果 schema 复检（程序化，零 LLM 成本）
+# ============================================================
+
+_SQL_TABLE_RE = re.compile(
+    r'\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_.]*)(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?',
+    re.IGNORECASE,
+)
+_SQL_QUALIFIED_COL_RE = re.compile(
+    r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b'
+)
+
+
+def _norm_table(name: str) -> str:
+    """规范化表名：去掉 main. 前缀（SQLite 默认库前缀不影响校验）"""
+    return name[5:] if name.startswith("main.") else name
+
+
+def _extract_tables(sql: str) -> list:
+    """提取 SQL 中的 (表名, 别名) 列表"""
+    out = []
+    for m in _SQL_TABLE_RE.finditer(sql or ""):
+        name, alias = m.group(1), m.group(2)
+        out.append((name, alias))
+    return out
+
+
+def _schema_check(sql: str, adapter, original_sql: str) -> list:
+    """复检修复后的 SQL：
+    1. 不得丢失原 SQL 中的表（防止降级为 SELECT * 全表查询）
+    2. 引用的表和限定列名必须真实存在
+    返回问题列表（空列表 = 通过）
+    """
+    if not sql:
+        return ["修复产物为空的 SQL"]
+    issues = []
+
+    new_tables = _extract_tables(sql)
+    new_table_names = {t for t, _ in new_tables}
+
+    # 1. 表集不丢失
+    for orig in {_norm_table(t) for t, _ in _extract_tables(original_sql)}:
+        if orig not in new_table_names and orig not in {_norm_table(t) for t in new_table_names}:
+            issues.append(f"丢失了原 SQL 中的表 {orig}")
+
+    # 2. 表存在性
+    for t in new_table_names:
+        try:
+            if not adapter.table_exists(_norm_table(t)):
+                issues.append(f"表不存在: {t}")
+        except Exception as e:
+            issues.append(f"表存在性检查失败: {t} ({e})")
+
+    # 3. 限定列名（alias.column）必须存在于对应表中
+    aliases = {}
+    for name, alias in new_tables:
+        aliases[alias or name] = name
+    for m in _SQL_QUALIFIED_COL_RE.finditer(sql):
+        a, col = m.groups()
+        tbl = aliases.get(a)
+        if tbl:
+            try:
+                cols = adapter.get_columns(_norm_table(tbl))
+                if col not in cols:
+                    issues.append(f"列不存在: {a}.{col}")
+            except Exception:
+                pass
+
+    return issues
+
+
+# ============================================================
 # 主入口：make_fix_agent 工厂函数
 # ============================================================
 
@@ -242,6 +313,16 @@ def make_fix_agent(adapter, execute_sql_node):
         if result.get("sql_error"):
             return (False, result["sql_error"])
         return (True, None)
+
+    def _verify_fixed(sql: str, original_sql: str) -> list:
+        """修复验收：可执行 + schema 复检（表不丢失、列真实存在）"""
+        issues = _schema_check(sql, adapter, original_sql)
+        if issues:
+            return issues
+        ok, err = _test_execute(sql)
+        if not ok:
+            return [f"执行失败: {err}"]
+        return []
 
     def fix_agent(state: dict) -> dict:
         """SQL 修复 Agent 节点 -- 智能诊断并修复 SQL 错误。
@@ -263,8 +344,12 @@ def make_fix_agent(adapter, execute_sql_node):
                 fixed_sql = _chain.invoke({"text": prompt})
                 fixed_sql = _clean_md(fixed_sql)
             except Exception:
-                return _build_return(state.get("sql", ""), "semantic_gap")
-            return _build_return(fixed_sql, "semantic_gap")
+                return _build_return(state.get("sql") or "", "semantic_gap")
+            # 复检：补全不得引入坏 SQL；不过关则放弃本次修复，保持原 SQL（让上层如实报错）
+            original_sql = state.get("sql") or ""
+            if not _verify_fixed(fixed_sql, original_sql):
+                return _build_return(fixed_sql, "semantic_gap")
+            return _build_return(original_sql, "semantic_gap")
 
         # Step 3: 收集数据库事实
         facts = _gather_facts(state, error_type, error_detail, adapter)
@@ -292,17 +377,31 @@ def make_fix_agent(adapter, execute_sql_node):
             except Exception:
                 break
 
-            test_ok, test_error = _test_execute(fixed_sql)
-            if test_ok:
+            # 修复验收：schema 复检（表不丢失、列真实存在）+ 可执行
+            verify_issues = _verify_fixed(fixed_sql, state.get("sql") or "")
+            if not verify_issues:
                 return _build_return(fixed_sql, "syntax")
 
-            # 重新诊断
-            new_type, new_detail = _diagnose_from_error(test_error)
+            # 执行测试用于下一轮诊断（schema 问题也能反映到错误信息）
+            test_ok, test_error = _test_execute(fixed_sql)
             history += (
                 f"## 第{attempt + 1}轮修复尝试\n"
                 f"修正SQL:\n```\n{fixed_sql}\n```\n"
-                f"新错误: {test_error}\n"
+                f"校验未通过: {'; '.join(verify_issues)}\n"
+                f"新错误: {test_error or '（可执行但 schema 复检未通过）'}\n"
             )
+
+            # 重新诊断并切换修复策略
+            new_type, new_detail = _diagnose_from_error(test_error)
+            if new_type == facts["current_error_type"]:
+                facts["error_detail"] = new_detail
+            else:
+                facts["current_error_type"] = new_type
+                facts["error_detail"] = new_detail
+                new_path = _SKILL_MAP.get(new_type, _DEFAULT_SKILL)
+                current_skill_md = _load_skill(new_path)
+                history += f"(错误类型变为 {new_type}，已切换修复策略)\n"
+                facts = {**facts, **_gather_facts(state, new_type, new_detail, adapter)}
 
             if new_type == facts["current_error_type"]:
                 facts["error_detail"] = new_detail

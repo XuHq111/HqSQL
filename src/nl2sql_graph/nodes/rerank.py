@@ -27,6 +27,13 @@ _chain = _prompt | flash_model | StrOutputParser()
 
 def rerank_tables(state: dict) -> dict:
     """LLM 根据表名+分数+简短描述+依赖规则，筛选真正需要的表"""
+    # 上游 guard：召回为空时不盲猜，直接透传 error 由图终止
+    if not state.get("all_tables"):
+        return {
+            "selected_names": [],
+            "rerank_raw": "",
+            "warnings": state.get("warnings", []),
+        }
     # 构建候选表文本
     table_lines = []
     for i, t in enumerate(state["all_tables"]):

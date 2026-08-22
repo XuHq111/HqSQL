@@ -1,3 +1,10 @@
+---
+name: fix_semantic
+description: 语义缺口修复 — 对照缺口清单逐条补全 SQL 中缺失的需求子句
+error_type: semantic_gap
+placeholders: [gap_list_text, query, sql, schema_context, lookup_context, core_rules]
+---
+
 # 语义缺口修复
 
 ## 诊断结果
