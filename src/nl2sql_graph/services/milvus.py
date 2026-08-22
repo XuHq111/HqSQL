@@ -1,16 +1,23 @@
 """Milvus 交互服务：Embedding + 向量检索"""
+import sys as _sys, os as _os
+_config_dir = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..', '..', '..', '环境配置'))
+if _config_dir not in _sys.path:
+    _sys.path.insert(0, _config_dir)
+from 环境配置.api_keys import DASHSCOPE_API_KEY
+
 import dashscope
 from pymilvus import Collection
 
-from .llm import API_KEY
+# 使用 DashScope 文本 embedding 模型（1024 维）
+EMBEDDING_MODEL = "qwen3.7-text-embedding"
 
 
 def embed_query(query: str) -> list:
-    """将用户查询转为 1152 维向量"""
-    resp = dashscope.MultiModalEmbedding.call(
-        model="tongyi-embedding-vision-plus-2026-03-06",
-        input=[{'text': query}],
-        api_key=API_KEY
+    """将用户查询转为 1024 维向量"""
+    resp = dashscope.TextEmbedding.call(
+        model=EMBEDDING_MODEL,
+        input=[query],
+        api_key=DASHSCOPE_API_KEY
     )
     if resp.status_code != 200:
         raise RuntimeError(f"Embedding 失败: {resp.code} {resp.message}")

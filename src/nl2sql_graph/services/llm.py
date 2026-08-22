@@ -1,12 +1,14 @@
 """LLM 调用服务 -- 分层模型策略，基于 LangChain 统一接口
 
-qwen3.6-flash: 轻量任务（澄清对话、选表重排序）
-qwen3.6-plus: 重量任务（SQL 生成、SQL 修复）
+DeepSeek 官方 API（OpenAI 兼容格式，base_url=https://api.deepseek.com）：
+- plus_model / flash_model 当前统一使用 deepseek-v4-flash
+- 保留两个单例，后续如需分层（重活/轻活）只需分别改模型名
 
-qwen3.x 系列必须使用 MultiModalConversation API，通过自定义 BaseChatModel 包装
+Embedding 仍走 DashScope（DeepSeek 官方 API 不提供 embedding 接口），见 milvus.py
 """
-import dashscope
+import openai
 import threading
+import time
 
 from typing import Any, List, Optional
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -18,9 +20,18 @@ import os as _os, sys as _sys
 _config_dir = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..', '..', '..', '环境配置'))
 if _config_dir not in _sys.path:
     _sys.path.insert(0, _config_dir)
-from 环境配置.api_keys import DASHSCOPE_API_KEY
+from 环境配置.api_keys import DASHSCOPE_API_KEY, DEEPSEEK_API_KEY
+
+# 仅供 embedding 使用（milvus.py / test_recall.py 引用），勿用于 chat
 API_KEY = DASHSCOPE_API_KEY
-dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
+
+# 30s 超时 + 仅 1 次重试：DeepSeek 偶发慢响应时快速失败并向前端报错，避免无限挂起
+_client = openai.OpenAI(
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com",
+    timeout=30.0,
+    max_retries=1,
+)
 
 # 线程局部：当前节点名（由 graph_builder._timed 设置，供 LLM 日志使用）
 _current_node = threading.local()
@@ -30,14 +41,34 @@ _current_node.name = "unknown"
 _current_session = threading.local()
 _current_session.id = None
 
+# 思维链推送注册表：session_id → fn(node_name, delta_text)
+# 由 api.py 注册，把 LLM 的 reasoning_content 增量实时推到前端 SSE
+_thinking_callbacks: dict = {}
 
-class _DashScopeChatModel(BaseChatModel):
-    """LangChain ChatModel 包装器，底层使用 DashScope MultiModalConversation API。
+# 思维链增量节流：累计多少字符推送一次
+_THINKING_CHUNK = 60
 
-    用于 qwen3.x 系列模型，因为此类模型必须走 MultiModalConversation 而非 Generation API。
+
+def _push_thinking(node: str, text: str):
+    """将 LLM 思维链增量推送到前端（若已注册回调）"""
+    session_id = getattr(_current_session, 'id', None)
+    if not session_id:
+        return
+    cb = _thinking_callbacks.get(session_id)
+    if cb:
+        try:
+            cb(node, text)
+        except Exception:
+            pass  # 推送失败不阻塞 LLM 调用
+
+
+class _DeepSeekChatModel(BaseChatModel):
+    """LangChain ChatModel 包装器，底层使用 DeepSeek 官方 API（OpenAI 兼容格式）。
+
+    使用流式调用：实时提取 reasoning_content（思维链）推送到前端，
+    并在流式结束后组装完整正文。
     """
     model: str
-    api_key: str
 
     def _generate(
         self,
@@ -46,34 +77,51 @@ class _DashScopeChatModel(BaseChatModel):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """将 LangChain messages 转为 DashScope 格式并调用"""
-        dashscope_messages = []
+        """将 LangChain messages 转为 OpenAI 格式并流式调用"""
+        openai_messages = []
         for msg in messages:
             role = 'user' if isinstance(msg, HumanMessage) else 'assistant'
-            dashscope_messages.append({'role': role, 'content': [{'text': msg.content}]})
+            openai_messages.append({'role': role, 'content': str(msg.content)})
 
         # 拼接 prompt 文本用于日志
         prompt_text = "\n".join(
-            f"[{m['role']}]: {m['content'][0]['text'][:2000]}" for m in dashscope_messages
+            f"[{m['role']}]: {m['content'][:2000]}" for m in openai_messages
         )
+        node = getattr(_current_node, 'name', 'unknown')
 
-        t0 = __import__('time').perf_counter()
-        resp = dashscope.MultiModalConversation.call(
-            model=self.model,
-            messages=dashscope_messages,
-            api_key=self.api_key,
-        )
-        elapsed = round(__import__('time').perf_counter() - t0, 3)
+        t0 = time.perf_counter()
+        try:
+            stream = _client.chat.completions.create(
+                model=self.model, messages=openai_messages, stream=True
+            )
+            content_parts = []
+            rc_buf = []
+            rc_len = 0
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                rc = getattr(delta, 'reasoning_content', None)
+                if rc:
+                    rc_buf.append(rc)
+                    rc_len += len(rc)
+                    if rc_len >= _THINKING_CHUNK:
+                        _push_thinking(node, "".join(rc_buf))
+                        rc_buf = []
+                        rc_len = 0
+                if delta.content:
+                    content_parts.append(delta.content)
+            if rc_buf:
+                _push_thinking(node, "".join(rc_buf))
+        except openai.APIError as e:
+            raise RuntimeError(f"LLM 调用失败: {e}") from e
+        elapsed = round(time.perf_counter() - t0, 3)
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"LLM 调用失败: {resp.code} {resp.message}")
-        if resp.output is None:
-            raise RuntimeError(f"LLM 返回空: code={resp.code}, message={resp.message}")
-
-        text = resp.output.choices[0].message.content[0]["text"]
+        text = "".join(content_parts)
+        if not text:
+            raise RuntimeError("LLM 返回空内容")
 
         # 日志记录
-        node = getattr(_current_node, 'name', 'unknown')
         session_id = getattr(_current_session, 'id', None)
         if session_id:
             try:
@@ -89,21 +137,22 @@ class _DashScopeChatModel(BaseChatModel):
 
     @property
     def _llm_type(self) -> str:
-        return "dashscope-multimodal"
+        return "deepseek"
 
 
 # 单例实例，供节点通过管道直接使用
-plus_model = _DashScopeChatModel(model="qwen3.6-plus", api_key=API_KEY)
-flash_model = _DashScopeChatModel(model="qwen3.6-flash", api_key=API_KEY)
+# 统一使用 deepseek-v4-flash，保留双单例以便未来按任务分层
+plus_model = _DeepSeekChatModel(model="deepseek-v4-flash")
+flash_model = _DeepSeekChatModel(model="deepseek-v4-flash")
 
 
 def call_llm(prompt: str) -> str:
-    """调用 qwen3.6-plus（用于 SQL 生成等精确任务）"""
+    """调用 plus 模型（用于 SQL 生成等精确任务）"""
     return plus_model.invoke([HumanMessage(content=prompt)]).content
 
 
 def call_llm_fast(prompt: str) -> str:
-    """调用 qwen3.6-flash（用于轻量快速任务）"""
+    """调用 flash 模型（用于轻量快速任务）"""
     return flash_model.invoke([HumanMessage(content=prompt)]).content
 
 

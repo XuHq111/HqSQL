@@ -1,6 +1,11 @@
+import sys as _sys, os as _os
+_config_dir = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), '..', '..', '环境配置'))
+if _config_dir not in _sys.path:
+    _sys.path.insert(0, _config_dir)
+from 环境配置.api_keys import DASHSCOPE_API_KEY
+
 import dashscope
 from pymilvus import Collection, connections
-from src.nl2sql_graph.services.llm import API_KEY
 
 connections.connect(host='localhost', port='19530', db_name='HqSQL')
 collection = Collection("tables")
@@ -20,10 +25,10 @@ for query in test_queries:
     print("=" * 70)
     print(f"查询: {query}")
 
-    resp = dashscope.MultiModalEmbedding.call(
-        model="tongyi-embedding-vision-plus-2026-03-06",
-        input=[{'text': query}],
-        api_key=API_KEY
+    resp = dashscope.TextEmbedding.call(
+        model="qwen3.7-text-embedding",
+        input=[query],
+        api_key=DASHSCOPE_API_KEY
     )
     if resp.status_code != 200:
         print(f"  Embedding 失败: {resp.code} {resp.message}")

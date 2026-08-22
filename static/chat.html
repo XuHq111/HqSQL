@@ -13,9 +13,9 @@
   #chat-area { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:12px; }
   .msg { max-width:85%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.6; }
   .msg.user { align-self:flex-end; background:#4f46e5; color:#fff; border-radius:12px 12px 0 12px; }
-  .msg.system { align-self:flex-start; background:#fff; border:1px solid #e5e7eb; border-radius:12px 12px 12px 0; }
+  .msg.system { align-self:flex-start; background:#fff; border:1px solid #e5e7eb; border-radius:12px 12px 12px 0; width:100%; max-width:85%; }
   .msg.progress { align-self:flex-start; background:#f0f0ff; border-left:3px solid #818cf8; border-radius:4px; padding:8px 12px; font-size:13px; color:#4f46e5; }
-  .msg.clarify { align-self:flex-start; background:#fff; border:1px solid #fbbf24; border-radius:12px 12px 12px 0; max-width:85%; }
+  .msg.clarify { align-self:flex-start; background:#fff; border:1px solid #fbbf24; border-radius:12px 12px 12px 0; width:fit-content; min-width:300px; max-width:85%; }
   .msg.error { align-self:flex-start; background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; }
   .sql-block { background:#1e1e1e; color:#d4d4d4; padding:10px 12px; border-radius:6px; font-family:monospace; font-size:12px; overflow-x:auto; margin-top:8px; white-space:pre-wrap; }
   .result-section { margin-top:12px; }
@@ -31,6 +31,12 @@
   .clarify-form input { padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; }
   .clarify-form button { align-self:flex-end; background:#f59e0b; color:#fff; border:none; padding:6px 16px; border-radius:6px; cursor:pointer; }
   .tip { font-size:11px; color:#9ca3af; margin-left:8px; }
+  .msg.thinking { align-self:flex-start; background:#f5f5ff; border:1px solid #c7d2fe; border-radius:12px 12px 12px 0; width:fit-content; min-width:300px; max-width:85%; }
+  .t-head { font-size:12px; color:#6366f1; font-weight:600; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+  .t-spin { display:inline-block; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .t-body { font-size:12px; color:#4b5563; font-family:monospace; white-space:pre-wrap; max-height:180px; overflow-y:auto; line-height:1.5; }
+  .p-timer { color:#818cf8; font-weight:600; margin-left:8px; }
 </style>
 </head>
 <body>
@@ -57,8 +63,69 @@ function appendUserMsg(text) {
   appendChat(`<div class="msg user">${escapeHtml(text)}</div>`);
 }
 
-function appendProgress(detail) {
-  appendChat(`<div class="msg progress">${detail}</div>`);
+function appendProgress(html, step) {
+  // 同节点内更新最近一条进度消息；新节点则追加一条（保留各节点耗时）
+  const area = document.getElementById("chat-area");
+  const lastMsg = area.lastElementChild;
+  if (lastMsg && lastMsg.classList.contains("msg") && lastMsg.classList.contains("progress")
+      && lastMsg.dataset.step === step) {
+    lastMsg.innerHTML = html + '<span class="p-timer"></span>';
+  } else {
+    appendChat(`<div class="msg progress" data-step="${escapeHtml(step || "")}">${html}<span class="p-timer"></span></div>`);
+  }
+  area.scrollTop = area.scrollHeight;
+}
+
+// 节点耗时计时器：progress 到达时重置，每秒更新显示
+let progressTimerId = null;
+let progressStartTs = 0;
+function armProgressTimer() {
+  progressStartTs = Date.now();
+  if (progressTimerId) clearInterval(progressTimerId);
+  progressTimerId = setInterval(() => {
+    const el = document.querySelector("#chat-area .msg.progress:last-child .p-timer");
+    if (el) el.textContent = "⏱ " + Math.round((Date.now() - progressStartTs) / 1000) + "s";
+  }, 1000);
+}
+function stopProgressTimer() {
+  if (progressTimerId) { clearInterval(progressTimerId); progressTimerId = null; }
+  // 停止时补写一次最终耗时（避免节点在1秒内结束导致计时器空白）
+  const el = document.querySelector("#chat-area .msg.progress:last-child .p-timer");
+  if (el && !el.textContent) {
+    el.textContent = "⏱ " + Math.round((Date.now() - progressStartTs) / 1000) + "s";
+  }
+}
+
+// LLM 思维链实时展示
+const thinkingState = { node: "", el: null };
+function handleThinking(node, delta) {
+  const area = document.getElementById("chat-area");
+  if (thinkingState.el && thinkingState.node !== node) {
+    closeThinking(true);
+  }
+  if (!thinkingState.el) {
+    appendChat(`<div class="msg thinking">
+      <div class="t-head">🧠 ${escapeHtml(node)} 思考中 <span class="t-spin">⠋</span></div>
+      <div class="t-body"></div>
+    </div>`);
+    const card = area.querySelector(".msg.thinking:last-child");
+    thinkingState.el = card.querySelector(".t-body");
+    thinkingState.node = node;
+  }
+  thinkingState.el.textContent += delta;
+  area.scrollTop = area.scrollHeight;
+}
+function closeThinking(finished) {
+  if (!thinkingState.el) return;
+  const card = thinkingState.el.closest(".msg.thinking");
+  if (finished) {
+    const head = card.querySelector(".t-head");
+    const len = card.querySelector(".t-body").textContent.length;
+    head.innerHTML = `✅ ${escapeHtml(thinkingState.node)} 思考完成${len ? ` · ${len} 字` : ""}`;
+    thinkingState.el.classList.add("t-done");
+  }
+  thinkingState.el = null;
+  thinkingState.node = "";
 }
 
 function escapeHtml(str) {
@@ -71,6 +138,8 @@ function connectSSE(sessionId) {
   if (eventSource) eventSource.close();
   eventSource = new EventSource(`/api/chat/stream?session_id=${sessionId}`);
 
+  let lastProgressStep = "";
+
   eventSource.addEventListener("progress", (e) => {
     let data;
     try {
@@ -81,8 +150,26 @@ function connectSSE(sessionId) {
       document.getElementById("query-input").disabled = false;
       return;
     }
-    const icon = "📋";
-    appendProgress(`${icon} ${data.detail}`);
+    const step = data.step || "";
+    if (step !== lastProgressStep) {
+      lastProgressStep = step;
+      closeThinking(true);   // 进入新节点，收尾上一节点的思考卡
+    }
+    appendProgress(`📋 ${escapeHtml(data.detail)}`, step);
+    armProgressTimer();      // 每次进度刷新都重置计时（同一节点多轮也重新计）
+  });
+
+  // LLM 思维链实时推送（reasoning_content 增量）
+  eventSource.addEventListener("thinking", (e) => {
+    let data;
+    try {
+      data = JSON.parse(e.data);
+    } catch(ex) {
+      return;
+    }
+    if (data.node && data.delta) {
+      handleThinking(data.node, data.delta);
+    }
   });
 
   eventSource.addEventListener("clarify", (e) => {
@@ -95,6 +182,8 @@ function connectSSE(sessionId) {
       document.getElementById("query-input").disabled = false;
       return;
     }
+    closeThinking(true);
+    stopProgressTimer();
     document.getElementById("pending-clarify").value = "1";
     const questionsHtml = data.questions.map((q, i) =>
       `<div>${i+1}. ${escapeHtml(q)}</div>`
@@ -105,12 +194,13 @@ function connectSSE(sessionId) {
         <div style="font-size:13px;margin-bottom:8px;">${questionsHtml}</div>
         <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">当前理解：${escapeHtml(data.enhanced_query)}</div>
         <div class="clarify-form">
-          <input type="text" id="clarify-input" placeholder="在此输入补充说明，或留空回车确认">
-          <button onclick="submitClarify()">确认</button>
+          <input type="text" class="clarify-input" placeholder="在此输入补充说明，或留空回车确认">
+          <button onclick="submitClarify(this)">确认</button>
         </div>
       </div>
     `);
-    document.getElementById("clarify-input")?.focus();
+    const clarifyInputs = document.querySelectorAll(".clarify-input");
+    clarifyInputs[clarifyInputs.length - 1]?.focus();
   });
 
   eventSource.addEventListener("result", (e) => {
@@ -161,6 +251,8 @@ function connectSSE(sessionId) {
     document.getElementById("send-btn").disabled = false;
     document.getElementById("query-input").disabled = false;
     document.getElementById("pending-clarify").value = "";
+    closeThinking(true);
+    stopProgressTimer();
     eventSource.close();
   });
 
@@ -185,6 +277,8 @@ function connectSSE(sessionId) {
     document.getElementById("send-btn").disabled = false;
     document.getElementById("query-input").disabled = false;
     document.getElementById("pending-clarify").value = "";
+    closeThinking(true);
+    stopProgressTimer();
     eventSource.close();
   });
 
@@ -219,8 +313,13 @@ async function sendMessage(messageText) {
   connectSSE(currentSessionId);
 }
 
-async function submitClarify() {
-  const input = document.getElementById("clarify-input");
+async function submitClarify(btnEl) {
+  // 定位当前澄清卡片：按钮点击从触发元素向上找所在卡片；回车提交取最后一张（最新出现的）
+  const cards = document.querySelectorAll(".msg.clarify");
+  const card = btnEl ? btnEl.closest(".msg.clarify") : (cards[cards.length - 1] ?? null);
+  if (!card) return;
+
+  const input = card.querySelector(".clarify-input");
   const reply = input ? input.value.trim() : "";
 
   await fetch("/api/chat", {
@@ -233,12 +332,11 @@ async function submitClarify() {
     }),
   });
 
-  const clarifyCard = document.querySelector(".msg.clarify");
-  if (clarifyCard) {
-    clarifyCard.innerHTML = `<div style="font-size:13px;color:#166534;">✅ 已提交${reply ? '：' + escapeHtml(reply) : '确认'}</div>`;
-    clarifyCard.style.border = "1px solid #86efac";
-    clarifyCard.style.background = "#f0fdf4";
-  }
+  card.innerHTML = `<div style="font-size:13px;color:#166534;">✅ 已提交${reply ? '：' + escapeHtml(reply) : '确认'}</div>`;
+  card.style.border = "1px solid #86efac";
+  card.style.background = "#f0fdf4";
+  // 已提交的卡片不再参与澄清定位，避免后续提交误伤旧卡片
+  card.classList.remove("clarify");
   document.getElementById("pending-clarify").value = "";
 }
 
