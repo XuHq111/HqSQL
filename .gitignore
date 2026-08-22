@@ -1,0 +1,20 @@
+/.claude/
+/docs/
+/CLAUDE.md
+/架构全流程/
+/table2milvus/
+/环境配置/
+/.idea/inspectionProfiles/profiles_settings.xml
+/.idea/.gitignore
+/.idea/HqSQL.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml
+/.gitignore
+
+# 构建产物与本地工具
+__pycache__/
+*.pyc
+/src/logs/
+/.superpowers/
+/.idea/
